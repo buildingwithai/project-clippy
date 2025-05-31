@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "skipLibCheck": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    // For composite projects, declaration must be true.
+    "declaration": true,
+    "declarationMap": true, // Optional: can be useful for debugging types
+    "emitDeclarationOnly": true, // We only want .d.ts files from this tsc run
+    "outDir": "dist-types", // Specify an output directory for declaration files
+    "noEmit": false // Must be false if declarations are emitted
+  },
+  "include": ["vite.config.ts", "tailwind.config.js", "postcss.config.js"]
+}

@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: 'Inter', sans-serif;
+  /* Apply dark theme globally if not using class-based toggling */
+  /* Or ensure html/body has the 'dark' class if using class-based dark mode */
+}
+
+/* Example: Custom scrollbar for a more thematic feel */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a; /* space-dark */
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e3a8a; /* nebula-blue */
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3b82f6; /* A lighter blue for hover */
+}
