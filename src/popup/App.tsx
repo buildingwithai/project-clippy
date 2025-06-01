@@ -1,253 +1,445 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+
+import { Edit3, Copy, Check, Plus, Folder as FolderIcon, ListFilter, Search, Trash2 } from 'lucide-react';
+import { AnimatedTooltip } from '@/components/ui/animated-tooltip';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+// Textarea will be used in the modal (Phase 2)
+// import { Textarea } from '@/components/ui/textarea'; 
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
+// Select will be used in the modal (Phase 2)
+// import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { Snippet } from '@/utils/types';
-import { cn } from '@/lib/utils';
 
-function App() {
-  const [title, setTitle] = useState('');
-  const [text, setText] = useState('');
+import type { Snippet, Folder } from '../utils/types';
+import { SnippetFormModal } from './components/SnippetFormModal';
+// import './App.css'; // File not found, commented out for build
+
+const App: React.FC = () => {
+  // ...existing state...
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [editingFolderName, setEditingFolderName] = useState('');
+
+  // Inline rename handler
+  const handleFolderRename = async (folderId: string) => {
+    const trimmed = editingFolderName.trim();
+    if (!trimmed) {
+      setEditingFolderId(null);
+      setEditingFolderName('');
+      return;
+    }
+    const updatedFolders = folders.map(f =>
+      f.id === folderId ? { ...f, name: trimmed } : f
+    );
+    setFolders(updatedFolders);
+    await chrome.storage.local.set({ folders: updatedFolders });
+    setEditingFolderId(null);
+    setEditingFolderName('');
+  };
   const [snippets, setSnippets] = useState<Snippet[]>([]);
-  const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState("manage");
-  const titleInputRef = useRef<HTMLInputElement>(null);
+  // Collapsible folder pane state
+  const [isFoldersCollapsed, setIsFoldersCollapsed] = useState(false);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const loadSnippets = useCallback(() => {
-    chrome.storage.local.get({ snippets: [] }, (result) => {
-      setSnippets(result.snippets as Snippet[]);
-    });
+  // For Folder Management (in left pane)
+  const [newFolderName, setNewFolderName] = useState('');
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const newFolderInputRef = useRef<HTMLInputElement>(null);
+
+  // For Filtering & Search
+  const [searchTerm, setSearchTerm] = useState('');
+  const [activeFilterFolderId, setActiveFilterFolderId] = useState<string | null>(null); 
+
+  const [copiedSnippetId, setCopiedSnippetId] = useState<string | null>(null);
+
+  // State for managing the Snippet Form Modal
+  const [isSnippetModalOpen, setIsSnippetModalOpen] = useState(false);
+  const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
+
+  const loadSnippetsAndFolders = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const result = await chrome.storage.local.get(['snippets', 'folders', 'pendingSnippetText']);
+      const loadedSnippets: Snippet[] = result.snippets || [];
+      const loadedFolders: Folder[] = result.folders || [];
+      
+      setSnippets(loadedSnippets.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      setFolders(loadedFolders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+
+      if (result.pendingSnippetText) {
+        console.log('Pending snippet text found, opening new snippet modal:', result.pendingSnippetText);
+        handleOpenNewSnippetModal(); // This will open a blank modal
+        // TODO: Enhance modal to accept initial text for new snippets from pendingSnippetText
+        await chrome.storage.local.remove('pendingSnippetText');
+      }
+      setError(null);
+    } catch (e) {
+      console.error('Error loading data:', e);
+      setError('Failed to load data. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    loadSnippets();
-    const messageListener = (message: any) => {
-      if (message.action === 'snippetSaved') {
-        loadSnippets();
-        setActiveTab("manage");
+    loadSnippetsAndFolders();
+    const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
+      if (areaName === 'local' && (changes.snippets || changes.folders)) {
+        loadSnippetsAndFolders(); 
       }
     };
-    chrome.runtime.onMessage.addListener(messageListener);
+    chrome.storage.onChanged.addListener(handleStorageChange);
     return () => {
-      chrome.runtime.onMessage.removeListener(messageListener);
+      chrome.storage.onChanged.removeListener(handleStorageChange);
     };
-  }, [loadSnippets]);
+  }, [loadSnippetsAndFolders]);
 
   useEffect(() => {
-    chrome.storage.local.get('pendingSnippetText', (result) => {
-      if (result.pendingSnippetText && typeof result.pendingSnippetText === 'string') {
-        setText(result.pendingSnippetText);
-        setActiveTab("add");
-        chrome.storage.local.remove('pendingSnippetText');
-        // Focus the title input field for a smoother UX
-        setTimeout(() => titleInputRef.current?.focus(), 0); // setTimeout to ensure focus after tab switch and render
-      }
-    });
-  }, []); // Runs once on component mount
+    if (isCreatingFolder && newFolderInputRef.current) {
+      newFolderInputRef.current.focus();
+    }
+  }, [isCreatingFolder]);
 
-  const resetFormAndState = () => {
-    setTitle('');
-    setText('');
-    setEditingSnippet(null);
-    setActiveTab("manage");
+  const handleSaveFromModal = async (snippetData: { title: string; text: string; folderId: string | null; id?: string }) => {
+    console.log('Attempting to save snippet (logic to be updated in Phase 2):', snippetData);
+    
+    let updatedSnippets;
+    const finalFolderId = snippetData.folderId === null ? undefined : snippetData.folderId;
+    if (snippetData.id) { // Editing existing snippet
+      updatedSnippets = snippets.map(s =>
+        s.id === snippetData.id
+          ? { ...s, title: snippetData.title.trim(), text: snippetData.text.trim(), folderId: finalFolderId, createdAt: new Date().toISOString() } 
+          : s
+      );
+    } else { // New snippet
+      const newSnippet: Snippet = {
+        id: `snippet-${Date.now()}`,
+        title: snippetData.title.trim(),
+        text: snippetData.text.trim(),
+        folderId: finalFolderId,
+        createdAt: new Date().toISOString(),
+        tags: [], // Default tags, can be expanded later
+        lastUsed: new Date().toISOString(),
+        frequency: 0,
+      };
+      updatedSnippets = [newSnippet, ...snippets];
+    }
+    
+    updatedSnippets.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    setSnippets(updatedSnippets);
+    await chrome.storage.local.set({ snippets: updatedSnippets });
+    setError(null);
+    // Modal closes itself via its onSave -> onClose callback
   };
 
-  const handleSaveSnippet = () => {
-    if (!text.trim()) {
-      console.warn('Snippet text cannot be empty');
-      return;
-    }
-    const newSnippet: Snippet = {
-      id: editingSnippet ? editingSnippet.id : `snippet-${Date.now()}`,
-      title: title.trim(),
-      text: text.trim(),
-      createdAt: editingSnippet ? editingSnippet.createdAt : new Date().toISOString(),
-      lastUsed: editingSnippet?.lastUsed,
-    };
-    chrome.storage.local.get({ snippets: [] }, (result) => {
-      let updatedSnippets: Snippet[];
-      if (editingSnippet) {
-        updatedSnippets = result.snippets.map((s: Snippet) => s.id === editingSnippet.id ? newSnippet : s);
-      } else {
-        updatedSnippets = [newSnippet, ...result.snippets];
-      }
-      chrome.storage.local.set({ snippets: updatedSnippets }, () => {
-        setSnippets(updatedSnippets);
-        resetFormAndState();
-      });
-    });
+  const handleOpenNewSnippetModal = () => {
+    setEditingSnippet(null);
+    setIsSnippetModalOpen(true);
   };
 
   const handleEditSnippet = (snippet: Snippet) => {
     setEditingSnippet(snippet);
-    setTitle(snippet.title || '');
-    setText(snippet.text);
-    setActiveTab("add");
+    setIsSnippetModalOpen(true);
   };
 
-  const handleDeleteSnippet = (snippetId: string) => {
-    chrome.storage.local.get({ snippets: [] }, (result) => {
-      const updatedSnippets = result.snippets.filter((s: Snippet) => s.id !== snippetId);
-      chrome.storage.local.set({ snippets: updatedSnippets }, () => {
-        setSnippets(updatedSnippets);
-        if (editingSnippet?.id === snippetId) {
-          resetFormAndState();
-        }
-      });
-    });
+  const handleDeleteSnippet = async (snippetId: string) => {
+    const updatedSnippets = snippets.filter(s => s.id !== snippetId);
+    setSnippets(updatedSnippets);
+    await chrome.storage.local.set({ snippets: updatedSnippets });
   };
 
-  const handleCopyToClipboard = (snippetText: string) => {
-    navigator.clipboard.writeText(snippetText).catch(err => {
-      console.error('Failed to copy snippet:', err);
-    });
+  const handleCopyToClipboard = async (snippet: Snippet) => {
+    try {
+      await navigator.clipboard.writeText(snippet.text);
+      setCopiedSnippetId(snippet.id);
+      setTimeout(() => setCopiedSnippetId(null), 2000);
+      const updatedSnippets = snippets.map(s => 
+        s.id === snippet.id 
+          ? { ...s, lastUsed: new Date().toISOString(), frequency: (s.frequency || 0) + 1 }
+          : s
+      );
+      // Optimistically update UI, then save to storage
+      setSnippets(updatedSnippets.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      await chrome.storage.local.set({ snippets: updatedSnippets });
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+      setError('Failed to copy snippet.');
+    }
   };
 
-  const filteredSnippets = snippets.filter(snippet => 
-    (snippet.title?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-     snippet.text.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const handleCreateFolder = async () => {
+    const trimmedName = newFolderName.trim();
+    if (!trimmedName) {
+      setIsCreatingFolder(false);
+      setNewFolderName('');
+      return;
+    }
+    const newFolderData: Folder = {
+      id: `folder-${Date.now()}`,
+      name: trimmedName,
+      emoji: '📁',
+      createdAt: new Date().toISOString(),
+    };
+    const updatedFolders = [newFolderData, ...folders].sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    setFolders(updatedFolders);
+    await chrome.storage.local.set({ folders: updatedFolders });
+    setNewFolderName('');
+    setIsCreatingFolder(false);
+  };
+
+  const handleNewFolderKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') handleCreateFolder();
+    if (event.key === 'Escape') {
+      setIsCreatingFolder(false);
+      setNewFolderName('');
+    }
+  };
+  const handleNewFolderBlur = () => {
+    if (newFolderName.trim()) handleCreateFolder();
+    else {
+      setIsCreatingFolder(false);
+      setNewFolderName('');
+    }
+  };
+
+  const handleDeleteFolder = async (folderId: string) => {
+    // Basic: Unassign snippets from this folder. More advanced logic (prompt user) can be added later.
+    const updatedSnippets = snippets.map(s => s.folderId === folderId ? { ...s, folderId: undefined } : s);
+    setSnippets(updatedSnippets);
+    await chrome.storage.local.set({ snippets: updatedSnippets });
+
+    const updatedFolders = folders.filter(f => f.id !== folderId);
+    setFolders(updatedFolders);
+    await chrome.storage.local.set({ folders: updatedFolders });
+
+    if (activeFilterFolderId === folderId) setActiveFilterFolderId(null);
+  };
+
+  const finalFilteredSnippets = snippets.filter(snippet => {
+    const matchesFolder = activeFilterFolderId ? snippet.folderId === activeFilterFolderId : true;
+    const searchTermLower = searchTerm.toLowerCase();
+    const matchesSearch = searchTerm
+      ? (snippet.title?.toLowerCase().includes(searchTermLower) || 
+         snippet.text.toLowerCase().includes(searchTermLower) ||
+         (snippet.folderId && folders.find(f=>f.id === snippet.folderId)?.name.toLowerCase().includes(searchTermLower)))
+      : true;
+    return matchesFolder && matchesSearch;
+  });
+
+  const getFolderById = (folderId: string | undefined): Folder | undefined => folders.find(f => f.id === folderId);
+
+  if (isLoading) return <div className="w-full h-full flex items-center justify-center"><p>Loading Clippy...</p></div>;
+  if (error) return <div className="w-full h-full flex items-center justify-center"><p className="text-red-500">{error}</p></div>;
+  
+  const currentDisplayTitle = activeFilterFolderId 
+    ? folders.find(f => f.id === activeFilterFolderId)?.name || 'Unknown Folder'
+    : 'All Snippets';
 
   return (
-    <TooltipProvider delayDuration={100}>
-      <div className={cn(
-        "p-4 h-full flex flex-col bg-gradient-to-br from-space-dark via-slate-900 to-cosmic-purple text-slate-200",
-        "w-[380px] h-[550px] border border-nebula-blue/50 rounded-lg shadow-2xl shadow-star-yellow/10"
-      )}>
-        <header className="mb-4 text-center">
-          <h1 className="text-3xl font-bold text-star-yellow tracking-wider">Project Clippy</h1>
-          <p className="text-sm text-slate-400">Your Instant Snippet Library</p>
+    <TooltipProvider>
+      <div className="w-full h-full flex flex-col p-4 bg-background text-foreground font-sans overflow-hidden">
+        {/* Header */}
+        <header className="flex items-center justify-between gap-2 mb-3 px-2 py-1 bg-transparent">
+          {/* Logo */}
+          <div className="flex items-center gap-2 min-w-[80px]">
+            <span className="text-xl font-bold text-sky-400">📎</span>
+            <span className="text-lg font-semibold text-sky-400 tracking-tight">Clippy</span>
+          </div>
+          {/* Search Bar */}
+          <div className="flex-1 flex justify-center">
+            <Input
+              type="search"
+              placeholder="Search snippets..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full max-w-[180px] h-8 text-sm bg-slate-800 text-slate-100 placeholder:text-slate-400 rounded-md shadow-none border border-slate-700 focus-visible:ring-2 focus-visible:ring-sky-500 transition-all mx-2"
+              style={{ minWidth: 0 }}
+            />
+          </div>
+          {/* New Snippet Button */}
+          <Button onClick={handleOpenNewSnippetModal} size="icon" className="bg-sky-400 hover:bg-sky-500 text-white rounded-full shadow-sm ml-2" aria-label="New Snippet">
+            <Plus className="w-5 h-5" />
+          </Button>
         </header>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-grow">
-          <TabsList className="grid w-full grid-cols-2 bg-slate-800/60 border border-nebula-blue/30 mb-4">
-            <TabsTrigger value="add" className="data-[state=active]:bg-nebula-blue/30 data-[state=active]:text-star-yellow">
-              {editingSnippet ? 'Edit Snippet' : 'Add Snippet'}
-            </TabsTrigger>
-            <TabsTrigger value="manage" className="data-[state=active]:bg-nebula-blue/30 data-[state=active]:text-star-yellow">
-              My Snippets
-            </TabsTrigger>
-          </TabsList>
+        {error && <p className="text-destructive text-center p-2">Error: {error}</p>}
 
-          <TabsContent value="add" className="flex-grow">
-            <Card className="bg-slate-800/50 border-nebula-blue/30 shadow-lg h-full flex flex-col">
-              <CardHeader>
-                <CardTitle className="text-star-yellow/90 text-xl">
-                  {editingSnippet ? 'Edit Snippet Details' : 'Create New Snippet'}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4 flex-grow">
-                <div>
-                  <Label htmlFor="title" className="text-slate-300 mb-1 block">Title (Optional)</Label>
-                  <Input 
-                    ref={titleInputRef} // Added ref
-                    id="title" 
-                    value={title} 
-                    onChange={(e) => setTitle(e.target.value)} 
-                    placeholder="E.g., Email Signature" 
-                    className="bg-slate-700/50 border-nebula-blue/50 text-slate-100 focus:ring-star-yellow"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="text" className="text-slate-300 mb-1 block">Snippet Text</Label>
-                  <Textarea 
-                    id="text" 
-                    value={text} 
-                    onChange={(e) => setText(e.target.value)} 
-                    placeholder="Paste or type your snippet here..." 
-                    rows={6} 
-                    className="bg-slate-700/50 border-nebula-blue/50 text-slate-100 focus:ring-star-yellow min-h-[120px] flex-grow"
-                  />
-                </div>
-              </CardContent>
-              <CardFooter className="flex justify-between mt-auto">
-                {editingSnippet && (
-                  <Button variant="outline" onClick={resetFormAndState} className="border-star-yellow/50 text-star-yellow/80 hover:bg-star-yellow/10">
-                    Cancel Edit
+        <SnippetFormModal
+          isOpen={isSnippetModalOpen}
+          onClose={() => setIsSnippetModalOpen(false)}
+          onSave={handleSaveFromModal}
+          snippetToEdit={editingSnippet}
+          folders={folders}
+        />
+
+        {/* Main Content Area */}
+        <div className="flex flex-1 min-h-0 overflow-hidden gap-2">
+          {/* Left Pane (Folders) */}
+          <aside className={`flex flex-col border-r border-slate-700 shrink-0 transition-all duration-200 ease-in-out bg-background ${isFoldersCollapsed ? 'w-[44px] items-center p-0' : 'w-[140px] space-y-1 pr-1'}`}>
+            <div className={`flex items-center mb-1 ${isFoldersCollapsed ? 'justify-center' : 'justify-between'}`}>
+              <h2 className={`text-base font-semibold tracking-tight ${isFoldersCollapsed ? 'sr-only' : ''}`}>Folders</h2>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={() => setIsFoldersCollapsed(v => !v)} className="h-7 w-7">
+                    {isFoldersCollapsed ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                    )}
                   </Button>
-                )}
-                {!editingSnippet && <div />} 
-                <Button onClick={handleSaveSnippet} className="bg-star-yellow text-space-dark hover:bg-star-yellow/80 active:animate-active-glow">
-                  {editingSnippet ? 'Update Snippet' : 'Save Snippet'}
-                </Button>
-              </CardFooter>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="manage" className="flex-grow flex flex-col overflow-hidden">
-            <div className="mb-4">
-              <Input 
-                type="search"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search snippets..."
-                className="bg-slate-700/50 border-nebula-blue/50 text-slate-100 focus:ring-star-yellow"
-              />
+                </TooltipTrigger>
+                <TooltipContent><p>{isFoldersCollapsed ? 'Expand Folders' : 'Collapse Folders'}</p></TooltipContent>
+              </Tooltip>
             </div>
-            <h2 className="text-xl font-semibold text-star-yellow/80 mb-3">
-              {filteredSnippets.length} {filteredSnippets.length === 1 ? "Snippet" : "Snippets"}
-            </h2>
-            <ScrollArea className="flex-grow pr-2 -mr-2">
-              {filteredSnippets.length > 0 ? (
-                <ul className="space-y-3">
-                  {filteredSnippets.map((snippet) => (
-                    <li key={snippet.id}>
-                      <Card className="bg-slate-800/30 border-nebula-blue/20 hover:border-nebula-blue/40 transition-colors duration-150">
-                        <CardHeader className="pb-2 pt-3 px-4">
-                          <CardTitle className="text-lg text-slate-100">
-                            {snippet.title || <span className="italic text-slate-400">Untitled Snippet</span>}
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="text-sm text-slate-300 px-4 pb-3 whitespace-pre-wrap break-words">
-                          {snippet.text.length > 100 ? `${snippet.text.substring(0, 100)}...` : snippet.text}
-                        </CardContent>
-                        <CardFooter className="px-4 pb-3 pt-2 flex justify-end space-x-2">
-                          <Tooltip>
+            <div className="flex-1 flex flex-col overflow-y-auto">
+               <ScrollArea className="flex-grow pr-1">
+                 <Button 
+                   variant={activeFilterFolderId === null ? 'secondary' : 'ghost'}
+                   onClick={() => setActiveFilterFolderId(null)}
+                   className={`w-full justify-center ${isFoldersCollapsed ? 'h-10 my-1' : 'justify-start text-sm h-8 mb-0.5'}`}
+                 >
+                   {isFoldersCollapsed ? <span title="All Snippets">🔎</span> : (<>All Snippets</>)}
+                 </Button>
+                 <AnimatedTooltip
+                   items={folders.map(folder => ({
+                     id: folder.id,
+                     name: folder.name,
+                     emoji: folder.emoji || '📁',
+                   }))}
+                   className="flex flex-col gap-1"
+                   activeId={activeFilterFolderId}
+                   editingId={editingFolderId}
+                   editingValue={editingFolderName}
+                   onClick={item => setActiveFilterFolderId(item.id)}
+                   onDoubleClick={item => {
+                     setEditingFolderId(item.id);
+                     setEditingFolderName(item.name);
+                   }}
+                   onContextMenu={(item, e) => {
+                     e.preventDefault();
+                     setEditingFolderId(item.id);
+                     setEditingFolderName(item.name);
+                   }}
+                   onRenameChange={setEditingFolderName}
+                   onRenameSubmit={item => handleFolderRename(item.id)}
+                 />
+                 {folders.length === 0 && !isCreatingFolder && (
+                   <p className="text-xs text-muted-foreground p-2 text-center">No folders yet. Click '+' below to create.</p>
+                 )}
+               </ScrollArea>
+             </div>
+             <div className="flex flex-col items-center py-2">
+               <Tooltip>
+                 <TooltipTrigger asChild>
+                   <Button variant="ghost" size="icon" onClick={() => {
+                     const newFolder = {
+                       id: `folder-${Date.now()}`,
+                       name: `New Folder ${folders.length + 1}`,
+                       emoji: '📁',
+                       createdAt: new Date().toISOString(),
+                     };
+                     const updatedFolders = [newFolder, ...folders];
+                     setFolders(updatedFolders);
+                     chrome.storage.local.set({ folders: updatedFolders });
+                   }} className="h-8 w-8 text-sky-400 hover:bg-slate-800 hover:text-sky-300">
+                     <span className="text-xl">➕</span>
+                   </Button>
+                 </TooltipTrigger>
+                 <TooltipContent><p>Create New Folder</p></TooltipContent>
+               </Tooltip>
+             </div>
+          </aside>
+
+          {/* Right Pane (Snippets) */}
+          <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+            <div className="flex justify-between items-center mb-2 shrink-0">
+                <h2 className="text-base font-semibold truncate pr-2" title={currentDisplayTitle}>
+                    {currentDisplayTitle} ({finalFilteredSnippets.length})
+                </h2>
+                {/* Placeholder for future sort/filter options for snippets */}
+                {/* <Button variant="outline" size="sm"><Settings2 className="h-4 w-4 mr-2"/>Display Options</Button> */}
+            </div>
+
+            {finalFilteredSnippets.length === 0 && (
+              <div className="flex-grow flex flex-col items-center justify-center text-center text-muted-foreground p-4">
+                <Search className="h-12 w-12 mb-4 opacity-50" />
+                <p className="text-lg font-medium mb-1">No Snippets Found</p>
+                {searchTerm && <p className="text-sm">Try adjusting your search or folder selection.</p>}
+                {!searchTerm && activeFilterFolderId && <p className="text-sm">This folder is empty.</p>}
+                {!searchTerm && !activeFilterFolderId && <p className="text-sm">Click &quot;New Snippet&quot; to add your first one!</p>}
+              </div>
+            )}
+            {finalFilteredSnippets.length > 0 && (
+                <ScrollArea className="flex-grow border rounded-lg p-0.5 bg-muted/10">
+                <div className="flex flex-col gap-2 p-1">
+                {finalFilteredSnippets.map((snippet) => {
+                    const folder = getFolderById(snippet.folderId);
+                    return (
+                    <div key={snippet.id} className="rounded-lg px-3 py-2 bg-slate-900 border border-slate-700 flex flex-col cursor-pointer">
+                        <div className="flex justify-between items-center gap-2 mb-1">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <h3 className="text-base font-semibold truncate pr-2 cursor-default flex-grow text-slate-100" title={snippet.title || 'Untitled Snippet'}>
+                                {snippet.title || <span className="italic text-slate-400">Untitled Snippet</span>}
+                            </h3>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" align="start" className="max-w-[300px] bg-white text-slate-800 p-2 rounded shadow text-xs whitespace-pre-wrap break-words z-50 border border-slate-200">
+                            <p>{snippet.text}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                        <div className="flex space-x-1 shrink-0 ml-2">
+                            <Tooltip>
                             <TooltipTrigger asChild>
-                              <Button variant="ghost" size="sm" onClick={() => handleCopyToClipboard(snippet.text)} className="text-sky-400 hover:text-sky-300 hover:bg-sky-400/10 p-1.5 h-auto">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
-                              </Button>
+                                <Button variant="ghost" size="icon" onClick={() => handleEditSnippet(snippet)} className="h-7 w-7">
+                                <Edit3 className="h-4 w-4" />
+                                </Button>
                             </TooltipTrigger>
-                            <TooltipContent className="bg-slate-900 text-slate-200 border-nebula-blue/50"><p>Copy</p></TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
+                            <TooltipContent><p>Edit Snippet</p></TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
                             <TooltipTrigger asChild>
-                              <Button variant="ghost" size="sm" onClick={() => handleEditSnippet(snippet)} className="text-amber-400 hover:text-amber-300 hover:bg-amber-400/10 p-1.5 h-auto">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
-                              </Button>
+                                <Button variant="ghost" size="icon" onClick={() => handleCopyToClipboard(snippet)} className="h-7 w-7">
+                                {copiedSnippetId === snippet.id ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                                </Button>
                             </TooltipTrigger>
-                            <TooltipContent className="bg-slate-900 text-slate-200 border-nebula-blue/50"><p>Edit</p></TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
+                            <TooltipContent><p>{copiedSnippetId === snippet.id ? 'Copied!' : 'Copy to Clipboard'}</p></TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
                             <TooltipTrigger asChild>
-                              <Button variant="ghost" size="sm" onClick={() => handleDeleteSnippet(snippet.id)} className="text-rose-500 hover:text-rose-400 hover:bg-rose-500/10 p-1.5 h-auto">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg>
-                              </Button>
+                                <Button variant="ghost" size="icon" onClick={() => handleDeleteSnippet(snippet.id)} className="h-7 w-7">
+                                <Trash2 className="h-4 w-4 text-destructive hover:text-destructive/80" />
+                                </Button>
                             </TooltipTrigger>
-                            <TooltipContent className="bg-slate-900 text-slate-200 border-nebula-blue/50"><p>Delete</p></TooltipContent>
-                          </Tooltip>
-                        </CardFooter>
-                      </Card>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-slate-400 text-center py-8">
-                  {searchTerm ? "No snippets match your search." : "No snippets yet. Add one!"}
-                </p>
-              )}
-            </ScrollArea>
-          </TabsContent>
-        </Tabs>
+                            <TooltipContent><p>Delete Snippet</p></TooltipContent>
+                            </Tooltip>
+                        </div>
+                        </div>
+
+                        {folder && (
+                        <div className="mt-2 pt-2 border-t border-border/50">
+                            <span className="text-xs text-muted-foreground inline-flex items-center cursor-default" title={`Folder: ${folder.name}`}>
+                            <FolderIcon className="h-3.5 w-3.5 mr-1.5 opacity-70" /> {folder.name}
+                            </span>
+                        </div>
+                        )}
+                    </div>
+                    );
+                })}
+                </div>
+                </ScrollArea>
+            )}
+          </main>
+        </div>
+        
+        {/* TODO: Phase 2 - SnippetFormModal will be rendered here conditionally */}
+        {/* e.g., <SnippetFormModal isOpen={isSnippetModalOpen} onOpenChange={setIsSnippetModalOpen} snippetData={editingSnippet} onSave={handleSaveSnippet} folders={folders} /> */}
+
       </div>
     </TooltipProvider>
   );
-}
+};
 
 export default App;

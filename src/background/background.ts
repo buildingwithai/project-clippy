@@ -88,61 +88,71 @@ function pasteTextInActiveElement(textToPaste: string) {
 }
 
 async function updatePasteContextMenu() {
-  chrome.contextMenus.remove('pasteSnippetParentChildren', () => {
-    if (chrome.runtime.lastError && !chrome.runtime.lastError.message?.includes('Cannot find menu item')) {
-      console.warn('Error removing old paste submenus (pasteSnippetParentChildren):', chrome.runtime.lastError.message);
+  // 1. Remove the main parent item. This removes all its children.
+  chrome.contextMenus.remove('pasteSnippetParent', () => {
+    // Ignore errors if it doesn't exist (e.g., first run after an error or clean install)
+    if (chrome.runtime.lastError && 
+        !chrome.runtime.lastError.message?.includes('Cannot find menu item with id pasteSnippetParent')) {
+      console.warn('Error removing main pasteSnippetParent:', chrome.runtime.lastError.message);
     }
-    createOrUpdatePasteSubmenuItems();
+
+    // 2. Recreate the main parent item.
+    chrome.contextMenus.create({
+      id: 'pasteSnippetParent',
+      title: 'Paste from Clippy',
+      contexts: ['editable'],
+    }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Error recreating pasteSnippetParent:', chrome.runtime.lastError.message);
+        return;
+      }
+      // 3. Populate its children with current snippets.
+      populatePasteSubmenuItems(); // Renamed for clarity
+    });
   });
 }
 
-function createOrUpdatePasteSubmenuItems() {
+// Renamed and slightly adjusted function to populate items
+function populatePasteSubmenuItems() {
   chrome.storage.local.get({ snippets: [] }, (result) => {
     const snippets: Snippet[] = result.snippets as Snippet[];
-    if (snippets.length > 0) {
-      chrome.contextMenus.create({
-        id: 'pasteSnippetParentChildren',
-        parentId: 'pasteSnippetParent',
-        title: 'Your Snippets',
-        contexts: ['editable'],
-        enabled: false
-      });
-
-      const recentSnippets = snippets.slice(0, 10);
-      recentSnippets.forEach((snippet) => {
-        chrome.contextMenus.create({
-          id: `paste-snippet-${snippet.id}`,
-          parentId: 'pasteSnippetParent',
-          title: snippet.title ? (snippet.title.length > 30 ? snippet.title.substring(0,27) + "..." : snippet.title) : (snippet.text.length > 30 ? snippet.text.substring(0, 27) + "..." : snippet.text),
-          contexts: ['editable'],
-        });
-      });
-      if (snippets.length > 10) {
-        chrome.contextMenus.create({
-          id: 'paste-separator-more',
-          parentId: 'pasteSnippetParent',
-          type: 'separator',
-          contexts: ['editable'],
-        });
-        chrome.contextMenus.create({
-          id: 'open-clippy-to-see-all',
-          parentId: 'pasteSnippetParent',
-          title: 'More... (Open Clippy)',
-          contexts: ['editable'],
-        });
-      }
-    } else {
-      chrome.contextMenus.remove('pasteSnippetParentChildren', () => {
-        if (chrome.runtime.lastError && !chrome.runtime.lastError.message?.includes('Cannot find menu item')) {
-          console.warn('Error removing pasteSnippetParentChildren when no snippets exist:', chrome.runtime.lastError.message);
-        }
-      });
+    
+    if (snippets.length === 0) {
       chrome.contextMenus.create({
         id: 'noSnippetsToPaste',
-        parentId: 'pasteSnippetParent',
+        parentId: 'pasteSnippetParent', // Parent is the newly created one
         title: '(No snippets saved yet)',
         contexts: ['editable'],
         enabled: false,
+      });
+      return;
+    }
+
+    // No need to create 'pasteSnippetParentChildren' group anymore, 
+    // as we are rebuilding under the main 'pasteSnippetParent'.
+
+    const recentSnippets = snippets.slice(0, 10);
+    recentSnippets.forEach((snippet) => {
+      chrome.contextMenus.create({
+        id: `paste-snippet-${snippet.id}`,
+        parentId: 'pasteSnippetParent',
+        title: snippet.title ? (snippet.title.length > 30 ? snippet.title.substring(0,27) + "..." : snippet.title) : (snippet.text.length > 30 ? snippet.text.substring(0, 27) + "..." : snippet.text),
+        contexts: ['editable'],
+      });
+    });
+
+    if (snippets.length > 10) {
+      chrome.contextMenus.create({
+        id: 'paste-separator-more',
+        parentId: 'pasteSnippetParent',
+        type: 'separator',
+        contexts: ['editable'],
+      });
+      chrome.contextMenus.create({
+        id: 'open-clippy-to-see-all', // Handled by the main onClicked listener
+        parentId: 'pasteSnippetParent',
+        title: 'More... (Open Clippy)',
+        contexts: ['editable'],
       });
     }
   });

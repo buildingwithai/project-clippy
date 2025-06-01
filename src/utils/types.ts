@@ -7,7 +7,15 @@ export interface Snippet {
   title?: string; // Optional title
   text: string;    // The snippet content
   createdAt: string; // ISO date string for when it was created
+  folderId?: string; // Optional: ID of the folder this snippet belongs to
   tags?: string[];   // Optional tags for better organization
   lastUsed?: string; // Optional: ISO date string for when it was last used
   frequency?: number; // Optional: How many times it has been used
+}
+
+export interface Folder {
+  id: string;
+  name: string;
+  emoji: string; // Emoji representing the folder
+  createdAt: string; // ISO date string
 }
