@@ -35,7 +35,29 @@
 - [x] **Subtask 6.2 (Optional Cleanup):** Consider deleting the `FolderPane.tsx` file if it's no longer needed.
 
 ## Task 7: Testing and Refinement
-- [ ] **Subtask 7.1:** Test "All Snippets" tab functionality.
+- [x] **Subtask 7.1:** Test "All Snippets" tab functionality.
 - [ ] **Subtask 7.2:** Test individual folder tab filtering.
 - [ ] **Subtask 7.3:** Verify visual appearance of icons, titles, and tooltips.
 - [ ] **Subtask 7.4:** Check for console errors or warnings.
+- [ ] **Subtask 7.5:** Ensure overall UI/UX is cohesive and intuitive.
+
+## Task 8: Add Spring/Bounce Animation to Folder Tab Tooltips
+- [x] **Subtask 8.1:** Verify `framer-motion` is a project dependency. If not, add it.
+- [x] **Subtask 8.2:** In `FolderTabs.tsx`, import `motion` from `framer-motion`.
+- [x] **Subtask 8.3:** Wrap the `TooltipContent` with `motion.div` and apply `initial`, `animate`, `exit`, and `transition` props to achieve a spring/bounce effect on hover, similar to the old `AnimatedTooltip`.
+- [-] **Subtask 8.4:** Test the tooltip animation. (FAILED - Tooltips are no longer visible)
+- [ ] **Subtask 8.5:** Troubleshoot and fix missing/broken tooltip animation.
+    - [x] **Sub-subtask 8.5.1:** Check browser developer console for any errors related to `framer-motion` or `Tooltip`.
+    - [x] **Sub-subtask 8.5.2:** Review the `motion(ShadTooltipContent)` Higher Order Component (HOC) usage. (Identified animation props as issue with HOC).
+    - [ ] **Sub-subtask 8.5.3:** Verify that `TooltipProvider` is correctly wrapping the components that need tooltips.
+    - [x] **Sub-subtask 8.5.4:** Temporarily simplify or remove the animation props (`initial`, `animate`, `exit`, `transition`) from `MotionTooltipContent` to see if tooltips reappear without animation. (Tooltips reappeared).
+    - [ ] **Sub-subtask 8.5.5:** If the HOC approach (`motion(ShadTooltipContent)`) is problematic, try wrapping the `p` tag *inside* `ShadTooltipContent` with a `motion.div` instead.
+    - [ ] **Sub-subtask 8.5.6:** Re-test tooltip visibility and animation after each change.
+
+## Task 9: Further Reduce Tooltip Size
+- [ ] **Subtask 9.1:** Adjust padding and font size of `TooltipContent` in `FolderTabs.tsx` to make it smaller (e.g., `p-1`, `text-[10px]`).
+- [ ] **Subtask 9.2:** Test new tooltip size.
+
+## Task 10: Remove Visible Folder Titles from Tabs
+- [ ] **Subtask 10.1:** In `FolderTabs.tsx`, remove the `<span>{folder.name}</span>` element from within the folder tab buttons.
+- [ ] **Subtask 10.2:** Test that folder titles are no longer visible on the tabs but still appear correctly in tooltips.
