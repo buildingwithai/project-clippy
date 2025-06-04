@@ -1,4 +1,73 @@
-# Project Clippy UI Redesign: Folder Tabs
+# Project Clippy UI Redesign: Folder Management
+
+## Legend
+- ✅ Complete
+- 🟡 In Progress
+- ⬜ Not Started
+
+## Completed Tasks
+
+### Folder Tabs Implementation
+- [x] **Task 1:** Restructure `App.tsx` Layout
+- [x] **Task 2:** Create `FolderTabs` Component
+- [x] **Task 3:** Style Folder Icons and Titles in `FolderTabs.tsx`
+- [x] **Task 4:** Adapt Tooltips for Folders
+- [x] **Task 5:** Update Filtering Logic and UI in `App.tsx`
+- [x] **Task 6:** Refactor/Remove Old `FolderPane.tsx`
+- [x] **Task 7:** Testing and Refinement
+- [x] **Task 8:** Add Spring/Bounce Animation to Folder Tab Tooltips
+
+## Current Tasks
+
+### UI Cleanup
+- [x] **Task 9.1:** Remove visible folder titles from tabs (icon-only display)
+- [ ] **Task 9.2:** Adjust tab spacing and sizing for icon-only display
+- [ ] **Task 9.3:** Ensure tooltips remain functional and well-positioned
+
+### Folder Management
+- [ ] **Task 10:** Implement Folder Deletion
+  - [ ] **10.1:** Add delete button/icon to each folder tab
+  - [ ] **10.2:** Implement confirmation dialog
+  - [ ] **10.3:** Update state and storage when deleting folders
+  - [ ] **10.4:** Handle edge cases (last folder, active folder deletion)
+
+- [ ] **Task 11:** Implement Folder Renaming
+  - [ ] **11.1:** Add double-click to edit functionality
+  - [ ] **11.2:** Create inline edit input component
+  - [ ] **11.3:** Implement save/cancel behavior
+  - [ ] **11.4:** Add input validation
+
+### Icon/Emoji Selection
+- [ ] **Task 12:** Implement Icon Selection
+  - [ ] **12.1:** Research and select icon/emoji library
+  - [ ] **12.2:** Add icon picker UI component
+  - [ ] **12.3:** Update folder data structure to include icon
+  - [ ] **12.4:** Implement icon selection and storage
+
+### State Management Updates
+- [ ] **Task 13:** Update Folder Data Structure
+  - [ ] **13.1:** Add `icon` field to folder type
+  - [ ] **13.2:** Ensure backward compatibility
+  - [ ] **13.3:** Update all folder-related functions
+
+### Testing and Polish
+- [ ] **Task 14:** Comprehensive Testing
+  - [ ] **14.1:** Test all CRUD operations
+  - [ ] **14.2:** Test icon selection and display
+  - [ ] **14.3:** Verify edge cases
+  - [ ] **14.4:** Test across different screen sizes
+
+## Future Enhancements
+- [ ] **Task 15:** Keyboard Navigation
+- [ ] **Task 16:** Folder Reordering
+- [ ] **Task 17:** Folder Colors/Themes
+- [ ] **Task 18:** Bulk Actions
+
+## Notes
+- All new components should follow the existing design system
+- Ensure all interactive elements have proper hover/focus states
+- Maintain accessibility standards throughout
+- Keep bundle size in mind when adding new dependencies
 
 ## Overall Goal: Redesign folder display to be a horizontal tab-like bar at the top with small icons and titles.
 
