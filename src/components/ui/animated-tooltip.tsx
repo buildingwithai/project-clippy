@@ -1,17 +1,24 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import * as React from "react";
 import { createPortal } from "react-dom";
-import {
-  motion,
-  useTransform,
-  AnimatePresence,
-  useMotionValue,
-  useSpring,
-} from "framer-motion";
+import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from "framer-motion";
 import { cn } from "@/lib/utils";
 
-export const AnimatedTooltip = ({
+interface AnimatedTooltipProps {
+  items: { id: string; name: string; emoji: string }[];
+  className?: string;
+  activeId?: string | null;
+  editingId?: string | null;
+  editingValue?: string;
+  onClick?: (item: { id: string; name: string; emoji: string }) => void;
+  onDoubleClick?: (item: { id: string; name: string; emoji: string }) => void;
+  onContextMenu?: (item: { id: string; name: string; emoji: string }, e: React.MouseEvent) => void;
+  onRenameChange?: (value: string) => void;
+  onRenameSubmit?: (item: { id: string; name: string; emoji: string }) => void;
+}
+
+export const AnimatedTooltip: React.FC<AnimatedTooltipProps> = ({
   items,
   className,
   activeId,
@@ -22,25 +29,10 @@ export const AnimatedTooltip = ({
   onContextMenu,
   onRenameChange,
   onRenameSubmit,
-}: {
-  items: {
-    id: string;
-    name: string;
-    emoji: string;
-  }[];
-  className?: string;
-  activeId?: string | null;
-  editingId?: string | null;
-  editingValue?: string;
-  onClick?: (item: { id: string; name: string; emoji: string }) => void;
-  onDoubleClick?: (item: { id: string; name: string; emoji: string }) => void;
-  onContextMenu?: (item: { id: string; name: string; emoji: string }, e: React.MouseEvent) => void;
-  onRenameChange?: (newValue: string) => void;
-  onRenameSubmit?: (item: { id: string; name: string; emoji: string }) => void;
 }) => {
-  const [hoveredIndex, setHoveredIndex] = useState<string | null>(null);
-  const [tooltipPos, setTooltipPos] = useState<{ left: number; top: number } | null>(null);
-  const [hoveredItem, setHoveredItem] = useState<{ id: string; name: string; emoji: string } | null>(null);
+  const [hoveredIndex, setHoveredIndex] = React.useState<string | null>(null);
+  const [tooltipPos, setTooltipPos] = React.useState<{ left: number; top: number } | null>(null);
+  const [hoveredItem, setHoveredItem] = React.useState<{ id: string; name: string; emoji: string } | null>(null);
 
   const springConfig = { stiffness: 100, damping: 5 };
   const x = useMotionValue(0);
@@ -52,9 +44,10 @@ export const AnimatedTooltip = ({
     useTransform(x, [-100, 100], [-50, 50]),
     springConfig
   );
-  const handleMouseMove = (event: any) => {
-    const halfWidth = event.target.offsetWidth / 2;
-    x.set(event.nativeEvent.offsetX - halfWidth);
+  const handleMouseMove = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const target = event.target as HTMLElement;
+    const halfWidth = target.offsetWidth / 2;
+    x.set((event.nativeEvent as MouseEvent).offsetX - halfWidth);
   };
 
   // Reset tooltip state if items array changes (sidebar collapse/expand, folder change)
@@ -101,7 +94,7 @@ export const AnimatedTooltip = ({
                   padding: 0,
                   margin: 0,
                 }}
-                onMouseMove={hoveredIndex === item.id ? handleMouseMove : undefined}
+                onMouseMove={hoveredIndex === item.id ? (e) => handleMouseMove(e as any) : undefined}
                 onMouseEnter={e => {
                   setHoveredIndex(item.id);
                   setHoveredItem(item);
