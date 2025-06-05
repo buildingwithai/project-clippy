@@ -1,0 +1,39 @@
+Product Requirements Document: Folder Tab Renaming Animation Debug
+
+1.  **Introduction**
+    The folder tab renaming feature in the Chrome extension popup is experiencing interaction and animation issues. When a user attempts to rename a folder by double-clicking, the trigger is unreliable, and the subsequent animation behaves incorrectly. This document outlines the requirements to fix these issues.
+
+2.  **Goals**
+    *   Ensure reliable double-click triggering for folder renaming.
+    *   Implement correct animation: the clicked folder icon remains stationary, the input field expands to its right, and any sibling folder tabs to the right are smoothly pushed aside.
+    *   Maintain all other existing folder tab functionalities (selection, emoji picker, deletion).
+
+3.  **Current Issues to Address**
+    *   **Unreliable Double-Click**: Renaming often requires more than a double-click or clicks in specific "edge" areas of the folder tab. Clicking directly on the emoji sometimes fails to trigger renaming.
+    *   **Incorrect Animation**: When renaming is triggered, the folder icon is pushed to the far left instead of remaining stationary. The input field does not expand correctly to the right of the icon. Adjacent folders are not consistently pushed.
+
+4.  **Functional Requirements for Renaming**
+    *   **FR1: Reliable Double-Click Trigger**
+        *   A standard double-click anywhere on the visible part of a folder tab (icon or its immediate surrounding area) must reliably initiate the renaming mode.
+        *   This should not interfere with single-click for folder selection or emoji picker toggling.
+    *   **FR2: Stationary Icon Animation**
+        *   When renaming mode is activated, the folder icon of the tab being renamed must remain visually stationary in its current position.
+    *   **FR3: Rightward Input Expansion**
+        *   The text input field for renaming must appear and animate its width expanding to the right of the stationary icon.
+        *   The input field's width should dynamically adjust to fit the folder name as the user types, with a reasonable minimum and maximum width.
+    *   **FR4: Sibling Tab Animation**
+        *   When a folder tab expands for renaming, all folder tabs to its right must smoothly animate (be pushed) to the right to make space, without any visual overlap.
+        *   When the renaming is completed or canceled and the input field collapses, sibling tabs should animate back to their original positions if space is reclaimed.
+    *   **FR5: Input Field Interaction**
+        *   Pressing "Enter" or clicking a "confirm" icon saves the new name.
+        *   Pressing "Escape" or clicking a "cancel" icon cancels renaming and reverts to the original name.
+        *   Losing focus (blur) on the input field should save the current name.
+
+5.  **Non-Functional Requirements**
+    *   **NFR1: Smooth Animations**: All animations (expansion, sibling movement) must be smooth and visually appealing, adhering to framer-motion best practices.
+    *   **NFR2: Performance**: The interaction and animation should be performant and not cause lag in the extension popup.
+
+6.  **Out of Scope for this Debug Task**
+    *   Changes to tooltip behavior.
+    *   Changes to the deletion confirmation dialog.
+    *   Fundamental changes to the emoji picker logic (beyond ensuring it doesn't block clicks).
