@@ -76,26 +76,29 @@ const App: React.FC = () => {
   }, [loadSnippetsAndFolders]);
 
   // Handle folder renaming
-  const handleFolderRename = async (folderId: string) => {
-    const trimmedName = editingFolderName.trim();
+  const handleFolderRename = async (folderId: string, newName: string) => {
+    const trimmedName = newName.trim();
     if (!trimmedName) {
-      setEditingFolderId(null);
-      setEditingFolderName('');
-      setFolderError('Folder name cannot be empty.');
+      setFolderError('Folder name cannot be empty.'); // Consider handling this error display within FolderTab
+      // You might want to throw an error here for FolderTab to catch and display
       return;
     }
     if (trimmedName.length > 50) {
-      setFolderError('Folder name is too long (max 50 chars).');
+      setFolderError('Folder name is too long (max 50 chars).'); // Consider handling this error display within FolderTab
+      // You might want to throw an error here for FolderTab to catch and display
       return;
     }
-    setFolderError(null);
-    const updatedFolders = folders.map(f =>
-      f.id === folderId ? { ...f, name: trimmedName } : f
-    );
-    setFolders(updatedFolders);
-    await chrome.storage.local.set({ folders: updatedFolders });
-    setEditingFolderId(null);
-    setEditingFolderName('');
+    setFolderError(null); // Clear app-level error if one was set by this flow
+    try {
+      const updatedFolders = folders.map(f =>
+        f.id === folderId ? { ...f, name: trimmedName } : f
+      );
+      setFolders(updatedFolders);
+      await chrome.storage.local.set({ folders: updatedFolders });
+    } catch (error) {
+      console.error('Failed to rename folder:', error);
+      setError('Failed to rename folder. Please try again.'); // Set general error for App.tsx to display if needed
+    }
   };
 
   // Handle folder deletion
@@ -128,6 +131,20 @@ const App: React.FC = () => {
       setError('Failed to delete folder. Please try again.');
     }
   }, [snippets, folders, activeFilterFolderId]);
+
+  // Handle emoji change for a folder
+  const handleEmojiChange = async (folderId: string, newEmoji: string) => {
+    try {
+      const updatedFolders = folders.map(folder =>
+        folder.id === folderId ? { ...folder, emoji: newEmoji } : folder
+      );
+      setFolders(updatedFolders);
+      await chrome.storage.local.set({ folders: updatedFolders });
+    } catch (error) {
+      console.error('Failed to change folder emoji:', error);
+      setError('Failed to change folder emoji. Please try again.');
+    }
+  };
 
   // Handle creation of a new folder
   const handleCreateNewFolder = useCallback(async () => {
@@ -274,6 +291,9 @@ const App: React.FC = () => {
           folders={folders}
           activeFilterFolderId={activeFilterFolderId}
           setActiveFilterFolderId={setActiveFilterFolderId}
+          onDeleteFolder={handleDeleteFolder}
+          onRenameFolder={handleFolderRename}
+          onEmojiChange={handleEmojiChange}
         />
         <main className="flex-1 p-4 overflow-auto flex flex-col pt-2"> {/* Added pt-2 for spacing below tabs */}
           <div className="flex justify-between items-center mb-4">
