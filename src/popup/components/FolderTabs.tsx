@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { List } from 'lucide-react';
 import { CustomTooltip } from '@/components/ui/custom-tooltip';
 import { FolderTab } from './FolderTab';
+import { NewFolderButton } from './NewFolderButton'; // Added import
 
 interface FolderTabsProps {
   folders: Folder[];
@@ -14,6 +15,10 @@ interface FolderTabsProps {
   onDeleteFolder: (folderId: string) => Promise<void>;
   onRenameFolder: (folderId: string, newName: string) => Promise<void>;
   onEmojiChange: (folderId: string, emoji: string) => Promise<void>;
+  onAddNewFolder: () => void; // For initiating new folder creation
+  isEditingOrCreatingFolder: boolean; // To disable add button during edits
+  editingFolderId: string | null; // ID of the folder being edited/created
+  onCancelRename: (folderId: string | null) => void; // Handler for cancelling edit/creation
 }
 
 export const FolderTabs: React.FC<FolderTabsProps> = ({
@@ -23,6 +28,10 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
   onDeleteFolder,
   onRenameFolder,
   onEmojiChange,
+  onAddNewFolder,
+  isEditingOrCreatingFolder,
+  editingFolderId,
+  onCancelRename,
 }) => {
   const handleDeleteFolder = useCallback(async (folderId: string) => {
     await onDeleteFolder(folderId);
@@ -33,9 +42,17 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
   }, [activeFilterFolderId, onDeleteFolder, setActiveFilterFolderId]);
 
   return (
-    <div className="p-1.5 border-b border-slate-700 flex space-x-1.5 items-center overflow-x-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
-      <CustomTooltip content="Show all snippets">
-        <Button
+    <div className="relative flex items-center h-10 min-h-[2.5rem] px-2 py-1 bg-slate-800 border-b border-slate-700/70">
+      {/* Scrollable container for tabs */}
+      <div 
+        className="flex-grow flex items-center space-x-1 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800 pr-10" // Added pr-10 to give space for the fixed button
+        style={{
+          maskImage: 'linear-gradient(to right, black calc(100% - 40px), transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 40px), transparent 100%)',
+        }}
+      >
+        <CustomTooltip content="Show all snippets">
+          <Button
           variant="ghost"
           size="sm"
           className={cn(
@@ -60,9 +77,16 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
           onDelete={handleDeleteFolder}
           onRename={onRenameFolder}
           onEmojiChange={onEmojiChange}
+          isInitiallyEditing={folder.id === editingFolderId} // Pass edit state
+          onCancelRename={() => onCancelRename(editingFolderId)} // Adapt to FolderTab's expected signature
         />
       ))}
       </LayoutGroup>
+      </div>
+      {/* Fixed container for the New Folder Button */}
+      <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10">
+        <NewFolderButton onClick={onAddNewFolder} disabled={isEditingOrCreatingFolder} />
+      </div>
     </div>
   );
 };

@@ -287,13 +287,17 @@ const App: React.FC = () => {
   return (
     <TooltipProvider>
       <div className="h-screen bg-background text-slate-100 flex flex-col">
-        <FolderTabs 
+        <FolderTabs
           folders={folders}
           activeFilterFolderId={activeFilterFolderId}
           setActiveFilterFolderId={setActiveFilterFolderId}
           onDeleteFolder={handleDeleteFolder}
           onRenameFolder={handleFolderRename}
           onEmojiChange={handleEmojiChange}
+          onAddNewFolder={handleCreateNewFolder}
+          isEditingOrCreatingFolder={!!editingFolderId} 
+          editingFolderId={editingFolderId} 
+          onCancelRename={() => setEditingFolderId(null)}
         />
         <main className="flex-1 p-4 overflow-auto flex flex-col pt-2"> {/* Added pt-2 for spacing below tabs */}
           <div className="flex justify-between items-center mb-4">

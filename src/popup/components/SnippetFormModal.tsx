@@ -107,7 +107,7 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
               <SelectTrigger className="col-span-3 bg-slate-800 text-slate-100 border border-slate-700 placeholder:text-slate-400 rounded-md shadow-none focus-visible:ring-2 focus-visible:ring-sky-500">
                 <SelectValue placeholder="Select a folder (optional)" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="bg-slate-800 text-slate-100 border border-slate-700">
                 <SelectItem value="none">No Folder</SelectItem>
                 {folders.map((folder) => (
                   <SelectItem key={folder.id} value={folder.id}>

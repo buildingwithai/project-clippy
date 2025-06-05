@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Folder as FolderIcon, X, Pencil, Check, X as XIcon } from 'lucide-react';
@@ -6,6 +6,7 @@ import { CustomTooltip } from '@/components/ui/custom-tooltip';
 import { cn } from '@/lib/utils';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { EmojiPicker } from '@/components/ui/emoji-picker';
+import { Trash2 } from 'lucide-react'; // Ensure Trash2 is imported
 
 interface FolderTabProps {
   folder: {
@@ -18,6 +19,8 @@ interface FolderTabProps {
   onDelete: (id: string) => Promise<void>;
   onRename: (id: string, newName: string) => Promise<void>;
   onEmojiChange: (id: string, emoji: string) => Promise<void>;
+  isInitiallyEditing?: boolean;
+  onCancelRename?: () => void;
 }
 
 export const FolderTab: React.FC<FolderTabProps> = ({
@@ -27,133 +30,167 @@ export const FolderTab: React.FC<FolderTabProps> = ({
   onDelete,
   onRename,
   onEmojiChange,
+  isInitiallyEditing = false,
+  onCancelRename,
 }) => {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(isInitiallyEditing);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isRenaming, setIsRenaming] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [folderName, setFolderName] = useState(folder.name);
-  // inputWidth will now be for the input field *and* its buttons
-  const [inputWidth, setInputWidth] = useState(0); 
+  const [inputWidth, setInputWidth] = useState(0);
+
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const clickCountRef = useRef(0);
 
-  // Calculate initial width based on folder name length
-  useEffect(() => {
-    if (isRenaming && inputRef.current) {
+  // Event Handlers wrapped with useCallback
+  const handleCancelRenameInternal = useCallback(() => {
+    if (onCancelRename) {
+      onCancelRename();
+    }
+    setFolderName(folder.name);
+    setIsRenaming(false);
+  }, [onCancelRename, folder.name, setFolderName, setIsRenaming]);
+
+  const handleRenameInternal = useCallback(async () => {
+    if (folderName.trim() && folderName !== folder.name) {
+      await onRename(folder.id, folderName.trim());
+    } else {
+      setFolderName(folder.name);
+    }
+    setIsRenaming(false);
+  }, [folderName, folder.name, folder.id, onRename, setFolderName, setIsRenaming]);
+
+  const handleDoubleClickInternal = useCallback(() => {
+    setIsRenaming(true);
+  }, [setIsRenaming]);
+
+  const handleInputChangeInternal = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const newName = e.target.value;
+    setFolderName(newName);
+    // Dynamic width calculation (can be further optimized if needed)
+    if (inputRef.current) {
       const tempSpan = document.createElement('span');
       tempSpan.style.visibility = 'hidden';
       tempSpan.style.position = 'absolute';
-      tempSpan.style.padding = '0 8px'; // Corresponds to input's horizontal padding
+      tempSpan.style.padding = '0 8px';
       tempSpan.style.fontSize = inputRef.current.style.fontSize || '0.875rem';
       tempSpan.style.fontFamily = inputRef.current.style.fontFamily || 'inherit';
-      tempSpan.textContent = folderName || 'New Folder'; // Use current folderName
+      tempSpan.textContent = newName || 'New Folder';
       document.body.appendChild(tempSpan);
-      // Approx 30px per icon button (w-6 + padding/margin) + input padding
-      const buttonsWidth = 60; // Space for Check and X buttons
-      setInputWidth(Math.max(80 + buttonsWidth, tempSpan.offsetWidth + buttonsWidth + 16)); // Ensure min width for text + buttons
+      const buttonsWidth = 60; // Approx. space for Check and X buttons
+      setInputWidth(Math.max(80 + buttonsWidth, tempSpan.offsetWidth + buttonsWidth + 16));
       document.body.removeChild(tempSpan);
-      // Focus after a short delay to ensure DOM is updated
+    }
+  }, [setFolderName, setInputWidth]);
+
+  const handleKeyDownInternal = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleRenameInternal();
+    } else if (e.key === 'Escape') {
+      handleCancelRenameInternal();
+    }
+  }, [handleRenameInternal, handleCancelRenameInternal]);
+
+  const handleDeleteClickInternal = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowDeleteDialog(true);
+  }, [setShowDeleteDialog]);
+
+  const confirmDeleteInternal = useCallback(async () => {
+    setIsDeleting(true);
+    try {
+      await onDelete(folder.id);
+    } catch (error) {
+      console.error('Failed to delete folder:', error);
+      // Optionally set an error state here to inform the user
+    }
+    setShowDeleteDialog(false);
+    setIsDeleting(false); // Ensure isDeleting is reset
+  }, [onDelete, folder.id, setIsDeleting, setShowDeleteDialog]);
+
+  const handleEmojiSelectInternal = useCallback(async (emoji: string) => {
+    await onEmojiChange(folder.id, emoji);
+    setShowEmojiPicker(false);
+  }, [onEmojiChange, folder.id, setShowEmojiPicker]);
+
+  const handleEmojiClickInternal = useCallback((e: React.MouseEvent) => {
+    setShowEmojiPicker(prev => !prev);
+  }, [setShowEmojiPicker]);
+
+  // useEffect Hooks
+  useEffect(() => {
+    if (isInitiallyEditing) {
+      setIsRenaming(true);
+    }
+  }, [isInitiallyEditing]);
+
+  // Effect for input width calculation and focus/text selection
+  useEffect(() => {
+    if (isRenaming && inputRef.current) {
+      // Calculate width
+      const tempSpan = document.createElement('span');
+      tempSpan.style.visibility = 'hidden';
+      tempSpan.style.position = 'absolute';
+      tempSpan.style.padding = '0 8px';
+      tempSpan.style.fontSize = inputRef.current.style.fontSize || '0.875rem';
+      tempSpan.style.fontFamily = inputRef.current.style.fontFamily || 'inherit';
+      tempSpan.textContent = folderName || 'New Folder';
+      document.body.appendChild(tempSpan);
+      const buttonsWidth = 60; // Approx. space for Check and X buttons
+      setInputWidth(Math.max(80 + buttonsWidth, tempSpan.offsetWidth + buttonsWidth + 16));
+      document.body.removeChild(tempSpan);
+
+      // Focus and select/position cursor
       requestAnimationFrame(() => {
         if (inputRef.current) {
           inputRef.current.focus();
-          inputRef.current.select();
+          if (isInitiallyEditing) {
+            inputRef.current.select(); // Select all text for new/initial edits
+          } else {
+            const len = inputRef.current.value.length;
+            inputRef.current.setSelectionRange(len, len);
+          }
         }
       });
     } else if (!isRenaming) {
       setInputWidth(0); // Reset width when not renaming
     }
-  }, [isRenaming, folderName]);
+  }, [isRenaming, folderName, isInitiallyEditing]); // folderName dependency ensures width recalculates on type
 
-  // Handle click outside to save renaming
+  // Effect for handling clicks outside the component
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         if (isRenaming) {
-          handleRename();
+          // Use the USER's logic for handling temp-new-folder-id
+          if (folder.id === 'temp-new-folder-id' && onCancelRename) {
+            handleCancelRenameInternal();
+          } else {
+            handleRenameInternal();
+          }
         } else if (showEmojiPicker) {
           setShowEmojiPicker(false);
         }
       }
     }
-
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isRenaming, showEmojiPicker]);
+  }, [isRenaming, showEmojiPicker, folder.id, handleRenameInternal, handleCancelRenameInternal, onCancelRename]);
 
-  const handleRename = async () => {
-    if (folderName.trim() && folderName !== folder.name) {
-      await onRename(folder.id, folderName);
-    } else {
-      setFolderName(folder.name);
-    }
-    setIsRenaming(false);
-  };
-
-  const handleDoubleClick = () => {
-    setIsRenaming(true);
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newName = e.target.value;
-    setFolderName(newName);
-    // Update width based on input
-    if (inputRef.current) {
-      const tempSpan = document.createElement('span');
-      tempSpan.style.visibility = 'hidden';
-      tempSpan.style.position = 'absolute';
-      tempSpan.style.padding = '0 8px'; // Corresponds to input's horizontal padding
-      tempSpan.style.fontSize = inputRef.current.style.fontSize || '0.875rem';
-      tempSpan.style.fontFamily = inputRef.current.style.fontFamily || 'inherit';
-      tempSpan.textContent = newName || 'New Folder';
-      document.body.appendChild(tempSpan);
-      const buttonsWidth = 60; // Space for Check and X buttons
-      setInputWidth(Math.max(80 + buttonsWidth, tempSpan.offsetWidth + buttonsWidth + 16));
-      document.body.removeChild(tempSpan);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleRename();
-    } else if (e.key === 'Escape') {
-      setFolderName(folder.name);
-      setIsRenaming(false);
-    }
-  };
-
-  const handleDeleteClick = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setShowDeleteDialog(true);
-  };
-
-  const confirmDelete = async () => {
-    setIsDeleting(true);
-    await onDelete(folder.id);
-    setShowDeleteDialog(false);
-  };
-
-  const handleEmojiSelect = async (emoji: string) => {
-    await onEmojiChange(folder.id, emoji);
-    setShowEmojiPicker(false);
-  };
-
-  const handleEmojiClick = (e: React.MouseEvent) => {
-    setShowEmojiPicker(!showEmojiPicker);
-  };
-
+  // The main JSX for the component
   return (
-    <motion.div 
-      layout 
+    <motion.div
+      layout
       ref={containerRef}
       className={cn(
         'group relative flex items-center h-8 rounded-md transition-colors duration-200',
         isActive ? 'bg-slate-700' : 'hover:bg-slate-700/50',
-        isRenaming && 'z-10 bg-slate-700 shadow-lg' 
+        isRenaming && 'z-10 bg-slate-700 shadow-lg'
       )}
     >
       <CustomTooltip content={isRenaming ? '' : folder.name}>
@@ -162,7 +199,6 @@ export const FolderTab: React.FC<FolderTabProps> = ({
           size="sm"
           className={cn(
             'h-8 w-8 p-0 flex items-center justify-center rounded-md flex-shrink-0',
-            // Always w-8 to keep icon container fixed. Background changes if renaming.
             isRenaming ? 'bg-transparent hover:bg-transparent' : '',
             isActive && !isRenaming ? 'bg-slate-700' : '',
             !isRenaming ? 'hover:bg-slate-700/50' : '',
@@ -178,7 +214,7 @@ export const FolderTab: React.FC<FolderTabProps> = ({
               }, 250);
             } else if (clickCountRef.current === 2) {
               if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
-              handleDoubleClick();
+              handleDoubleClickInternal();
               clickCountRef.current = 0;
             }
           }}
@@ -187,7 +223,7 @@ export const FolderTab: React.FC<FolderTabProps> = ({
           <div className="relative w-8 h-8 flex items-center justify-center flex-shrink-0">
             <button
               type="button"
-              onClick={handleEmojiClick}
+              onClick={handleEmojiClickInternal}
               className="text-sm hover:bg-slate-600/50 rounded-md p-0.5 transition-colors"
               aria-label="Change folder emoji"
             >
@@ -196,7 +232,7 @@ export const FolderTab: React.FC<FolderTabProps> = ({
             {showEmojiPicker && (
               <div className="fixed z-[100] -translate-x-1/2 left-1/2 bottom-full mb-2">
                 <div className="bg-slate-800 rounded-lg shadow-xl border border-slate-700 overflow-hidden">
-                  <EmojiPicker value={folder.emoji || '📁'} onChange={handleEmojiSelect} />
+                  <EmojiPicker value={folder.emoji || '📁'} onChange={handleEmojiSelectInternal} />
                 </div>
               </div>
             )}
@@ -207,8 +243,8 @@ export const FolderTab: React.FC<FolderTabProps> = ({
       <AnimatePresence initial={false}>
         {isRenaming && (
           <motion.div
-            layout 
-            className="flex items-center h-full ml-1 pl-1 pr-1 bg-slate-700 rounded-md" // Added padding and bg for clarity
+            layout
+            className="flex items-center h-full ml-1 pl-1 pr-1 bg-slate-700 rounded-md"
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: inputWidth, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
@@ -218,25 +254,23 @@ export const FolderTab: React.FC<FolderTabProps> = ({
               ref={inputRef}
               type="text"
               value={folderName}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
+              onChange={handleInputChangeInternal}
+              onKeyDown={handleKeyDownInternal}
               className="bg-slate-600 text-white placeholder-slate-400 text-sm rounded-l-md px-2 h-full flex-grow focus:outline-none focus:ring-1 focus:ring-sky-500 min-w-0"
               placeholder="Folder name"
-              style={{ caretColor: 'white' }} 
+              style={{ caretColor: 'white' }}
             />
-            {/* Confirm Button */}
             <Button
               variant="ghost" size="icon"
               className="h-full w-7 text-green-500 hover:text-green-400 hover:bg-slate-600 flex-shrink-0 rounded-none"
-              onClick={handleRename} aria-label="Confirm rename"
+              onClick={handleRenameInternal} aria-label="Confirm rename"
             >
               <Check size={18} />
             </Button>
-            {/* Cancel Button */}
             <Button
               variant="ghost" size="icon"
               className="h-full w-7 text-red-500 hover:text-red-400 hover:bg-slate-600 flex-shrink-0 rounded-r-md rounded-l-none"
-              onClick={() => { setFolderName(folder.name); setIsRenaming(false); }} 
+              onClick={handleCancelRenameInternal}
               aria-label="Cancel rename"
             >
               <XIcon size={18} />
@@ -246,13 +280,13 @@ export const FolderTab: React.FC<FolderTabProps> = ({
       </AnimatePresence>
 
       {isActive && !isRenaming && (
-         <CustomTooltip content="Delete folder">
+        <CustomTooltip content="Delete folder">
           <Button
             variant="ghost" size="icon"
             className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-            onClick={handleDeleteClick} disabled={isDeleting} aria-label="Delete folder"
+            onClick={handleDeleteClickInternal} disabled={isDeleting} aria-label="Delete folder"
           >
-            <X size={16} />
+            <Trash2 size={16} /> {/* Changed from X to Trash2 for delete icon */}
           </Button>
         </CustomTooltip>
       )}
@@ -260,15 +294,11 @@ export const FolderTab: React.FC<FolderTabProps> = ({
       <ConfirmationDialog
         isOpen={showDeleteDialog}
         onClose={() => setShowDeleteDialog(false)}
-        onConfirm={confirmDelete}
+        onConfirm={confirmDeleteInternal}
         title={`Delete Folder "${folder.name}"?`}
         description="This action cannot be undone. All snippets in this folder will become uncategorized."
         confirmText="Delete"
         variant="destructive"
-        // isLoading prop is not defined on ConfirmationDialog, remove if not used internally for styling
-        // If isLoading is for the button, that's handled internally by the Button component or needs a different prop on ConfirmationDialog
-        // For now, assuming isLoading was a typo or meant for a different component, as ConfirmationDialog doesn't use it.
-        // isLoading={isDeleting} 
       />
     </motion.div>
   );
