@@ -103,9 +103,6 @@ const App: React.FC = () => {
 
   // Handle folder deletion
   const handleDeleteFolder = useCallback(async (folderId: string) => {
-    if (!confirm('Are you sure you want to delete this folder? Snippets in this folder will become uncategorized.')) {
-      return;
-    }
     try {
       const updatedSnippets = snippets.map(snippet =>
         snippet.folderId === folderId
