@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useSpring, useTransform } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Folder as FolderIcon, X, Pencil, Check, X as XIcon } from 'lucide-react';
 import { CustomTooltip } from '@/components/ui/custom-tooltip';
 import { cn } from '@/lib/utils';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { EmojiPicker } from '@/components/ui/emoji-picker';
-import { Trash2 } from 'lucide-react'; // Ensure Trash2 is imported
+import { Trash2 } from 'lucide-react';
+import { useDockEffect } from '@/hooks/useDockEffect';
 
 interface FolderTabProps {
   folder: {
@@ -181,20 +182,33 @@ export const FolderTab: React.FC<FolderTabProps> = ({
 
   // The main JSX for the component
   return (
-    <motion.div
-      layout
-      ref={containerRef}
-      className={cn(
-        'group relative flex items-center h-8 rounded-md transition-colors duration-200 flex-shrink-0',
-        isActive ? 'bg-slate-700' : 'hover:bg-slate-700/50',
-        isRenaming && 'z-10 bg-slate-700 shadow-lg',
-        'min-w-[40px]' // Ensure minimum width for the tab
-      )}
-      style={{
-        maxWidth: '200px', // Prevent tabs from getting too wide
-        overflow: 'hidden' // Hide overflow content
-      }}
-    >
+    <div className="relative flex items-center" ref={containerRef}>
+      <motion.div
+        layout
+        className={cn(
+          'group relative flex items-center h-8 rounded-md transition-all duration-300 flex-shrink-0',
+          isActive ? 'bg-slate-700' : 'hover:bg-slate-700/50',
+          isRenaming && 'z-10 bg-slate-700 shadow-lg',
+          'min-w-[40px]', // Ensure minimum width for the tab
+          'origin-bottom' // For smooth scaling from the bottom
+        )}
+        style={{
+          maxWidth: '200px', // Prevent tabs from getting too wide
+          overflow: 'hidden', // Hide overflow content
+          scale: 1,
+          y: 0,
+          transition: 'transform 0.2s ease-out, background-color 0.2s ease',
+        }}
+        whileHover={!isRenaming ? {
+          scale: 1.2,
+          y: -4,
+          transition: { 
+            type: 'spring',
+            stiffness: 400,
+            damping: 15
+          }
+        } : {}}
+      >
       <CustomTooltip content={isRenaming ? '' : folder.name}>
         <Button
           variant="ghost"
@@ -297,15 +311,16 @@ export const FolderTab: React.FC<FolderTabProps> = ({
         )}
       </AnimatePresence>
 
-      <ConfirmationDialog
-        isOpen={showDeleteDialog}
-        onClose={() => setShowDeleteDialog(false)}
-        onConfirm={confirmDeleteInternal}
-        title={`Delete Folder "${folder.name}"?`}
-        description="This action cannot be undone. All snippets in this folder will become uncategorized."
-        confirmText="Delete"
-        variant="destructive"
-      />
-    </motion.div>
+        <ConfirmationDialog
+          isOpen={showDeleteDialog}
+          onClose={() => setShowDeleteDialog(false)}
+          onConfirm={confirmDeleteInternal}
+          title={`Delete Folder "${folder.name}"?`}
+          description="This action cannot be undone. All snippets in this folder will become uncategorized."
+          confirmText="Delete"
+          variant="destructive"
+        />
+      </motion.div>
+    </div>
   );
 };

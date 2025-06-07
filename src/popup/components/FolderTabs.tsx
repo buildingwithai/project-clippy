@@ -1,12 +1,13 @@
-import React, { useCallback } from 'react';
-import { LayoutGroup } from 'framer-motion';
+import React, { useCallback, useRef } from 'react';
+import { LayoutGroup, motion, AnimatePresence } from 'framer-motion';
 import type { Folder } from '../../utils/types';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { List } from 'lucide-react';
 import { CustomTooltip } from '@/components/ui/custom-tooltip';
 import { FolderTab } from './FolderTab';
-import { NewFolderButton } from './NewFolderButton'; // Added import
+import { NewFolderButton } from './NewFolderButton';
+import { useDockEffect } from '@/hooks/useDockEffect';
 
 interface FolderTabsProps {
   folders: Folder[];
@@ -41,8 +42,20 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
     }
   }, [activeFilterFolderId, onDeleteFolder, setActiveFilterFolderId]);
 
+  // Use the dock effect hook
+  const dockRef = useRef<HTMLDivElement>(null);
+  const { scales, getItemRef } = useDockEffect({
+    itemCount: folders.length,
+    baseSize: 32, // Base size of the folder icons
+    maxScale: 1.4, // Maximum scale on hover
+    effectWidth: 200, // Width of the hover effect area
+  });
+
   return (
-    <div className="relative flex items-center h-10 min-h-[2.5rem] px-2 py-1 bg-slate-800 border-b border-slate-700/70">
+    <div 
+      ref={dockRef}
+      className="relative flex items-center h-12 min-h-[3rem] px-2 py-1 bg-slate-800 border-b border-slate-700/70 overflow-hidden"
+    >
       {/* Scrollable container for tabs */}
       <div 
         className="flex-grow flex items-center space-x-1 overflow-x-auto pr-10"
@@ -51,6 +64,7 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
           scrollbarColor: '#4B5563 #1F2937', // slate-600 / slate-800
           maskImage: 'linear-gradient(to right, black calc(100% - 40px), transparent 100%)',
           WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 40px), transparent 100%)',
+          paddingBottom: '4px', // Add some padding at the bottom for the dock effect
         }}
       >
         {/* Custom scrollbar styles for WebKit browsers */}
@@ -85,19 +99,30 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
       </CustomTooltip>
 
       <LayoutGroup>
-        {folders.map((folder) => (
-        <FolderTab
-          key={folder.id}
-          folder={folder}
-          isActive={activeFilterFolderId === folder.id}
-          onSelect={() => setActiveFilterFolderId(folder.id)}
-          onDelete={handleDeleteFolder}
-          onRename={onRenameFolder}
-          onEmojiChange={onEmojiChange}
-          isInitiallyEditing={folder.id === editingFolderId} // Pass edit state
-          onCancelRename={() => onCancelRename(editingFolderId)} // Adapt to FolderTab's expected signature
-        />
-      ))}
+        {folders.map((folder, index) => (
+          <motion.div
+            key={folder.id}
+            ref={getItemRef(index)}
+            style={{
+              scale: scales[index] || 1,
+              transformOrigin: 'bottom center',
+              transition: 'transform 0.2s ease-out',
+              zIndex: activeFilterFolderId === folder.id ? 10 : 1,
+            }}
+            className="flex items-center"
+          >
+            <FolderTab
+              folder={folder}
+              isActive={activeFilterFolderId === folder.id}
+              onSelect={() => setActiveFilterFolderId(folder.id)}
+              onDelete={handleDeleteFolder}
+              onRename={onRenameFolder}
+              onEmojiChange={onEmojiChange}
+              isInitiallyEditing={folder.id === editingFolderId}
+              onCancelRename={() => onCancelRename(editingFolderId)}
+            />
+          </motion.div>
+        ))}
       </LayoutGroup>
       </div>
       {/* Fixed container for the New Folder Button */}

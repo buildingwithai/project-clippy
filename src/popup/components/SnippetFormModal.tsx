@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { MagnetizeButton } from '@/components/ui/magnetize-button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -132,13 +133,13 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
         </div>
         <DialogFooter className="mt-4">
           <DialogClose asChild>
-            <Button type="button" variant="outline">
+            <Button type="button" variant="secondary" className="border-none">
               Cancel
             </Button>
           </DialogClose>
-          <Button type="button" onClick={handleSubmit}>
+          <MagnetizeButton type="button" onClick={handleSubmit}>
             {snippetToEdit ? 'Save Changes' : 'Create Snippet'}
-          </Button>
+          </MagnetizeButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>
