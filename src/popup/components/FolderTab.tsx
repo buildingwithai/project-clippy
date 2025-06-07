@@ -185,10 +185,15 @@ export const FolderTab: React.FC<FolderTabProps> = ({
       layout
       ref={containerRef}
       className={cn(
-        'group relative flex items-center h-8 rounded-md transition-colors duration-200',
+        'group relative flex items-center h-8 rounded-md transition-colors duration-200 flex-shrink-0',
         isActive ? 'bg-slate-700' : 'hover:bg-slate-700/50',
-        isRenaming && 'z-10 bg-slate-700 shadow-lg'
+        isRenaming && 'z-10 bg-slate-700 shadow-lg',
+        'min-w-[40px]' // Ensure minimum width for the tab
       )}
+      style={{
+        maxWidth: '200px', // Prevent tabs from getting too wide
+        overflow: 'hidden' // Hide overflow content
+      }}
     >
       <CustomTooltip content={isRenaming ? '' : folder.name}>
         <Button

@@ -45,12 +45,29 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
     <div className="relative flex items-center h-10 min-h-[2.5rem] px-2 py-1 bg-slate-800 border-b border-slate-700/70">
       {/* Scrollable container for tabs */}
       <div 
-        className="flex-grow flex items-center space-x-1 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800 pr-10" // Added pr-10 to give space for the fixed button
+        className="flex-grow flex items-center space-x-1 overflow-x-auto pr-10"
         style={{
+          scrollbarWidth: 'thin',
+          scrollbarColor: '#4B5563 #1F2937', // slate-600 / slate-800
           maskImage: 'linear-gradient(to right, black calc(100% - 40px), transparent 100%)',
           WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 40px), transparent 100%)',
         }}
       >
+        {/* Custom scrollbar styles for WebKit browsers */}
+        <style dangerouslySetInnerHTML={{
+          __html: `
+            .folder-tabs-scroll::-webkit-scrollbar {
+              height: 3px;
+            }
+            .folder-tabs-scroll::-webkit-scrollbar-track {
+              background: #1F2937; /* slate-800 */
+            }
+            .folder-tabs-scroll::-webkit-scrollbar-thumb {
+              background-color: #4B5563; /* slate-600 */
+              border-radius: 3px;
+            }
+          `
+        }} />
         <CustomTooltip content="Show all snippets">
           <Button
           variant="ghost"
@@ -84,7 +101,7 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
       </LayoutGroup>
       </div>
       {/* Fixed container for the New Folder Button */}
-      <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10">
+      <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10 flex-shrink-0">
         <NewFolderButton onClick={onAddNewFolder} disabled={isEditingOrCreatingFolder} />
       </div>
     </div>
