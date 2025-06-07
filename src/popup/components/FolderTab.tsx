@@ -143,16 +143,13 @@ export const FolderTab: React.FC<FolderTabProps> = ({
       setInputWidth(Math.max(80 + buttonsWidth, tempSpan.offsetWidth + buttonsWidth + 16));
       document.body.removeChild(tempSpan);
 
-      // Focus and select/position cursor
+      // Focus and position cursor at the end of the text
       requestAnimationFrame(() => {
         if (inputRef.current) {
           inputRef.current.focus();
-          if (isInitiallyEditing) {
-            inputRef.current.select(); // Select all text for new/initial edits
-          } else {
-            const len = inputRef.current.value.length;
-            inputRef.current.setSelectionRange(len, len);
-          }
+          // Always place cursor at the end of the text, don't select all
+          const len = inputRef.current.value.length;
+          inputRef.current.setSelectionRange(len, len);
         }
       });
     } else if (!isRenaming) {
@@ -229,6 +226,22 @@ export const FolderTab: React.FC<FolderTabProps> = ({
             >
               {folder.emoji || '📁'}
             </button>
+            {isActive && !isRenaming && (
+              <CustomTooltip content="Delete folder">
+                <Button
+                  variant="ghost"
+                  className="absolute top-0 -right-1 h-2 w-2 p-0 flex items-center justify-center text-red-500 hover:text-red-400 z-10"
+                  onClick={(e) => { 
+                    e.stopPropagation(); // Prevent main button click
+                    handleDeleteClickInternal(e); 
+                  }}
+                  disabled={isDeleting}
+                  aria-label="Delete folder"
+                >
+                  <Trash2 size={4} />
+                </Button>
+              </CustomTooltip>
+            )}
             {showEmojiPicker && (
               <div className="fixed z-[100] -translate-x-1/2 left-1/2 bottom-full mb-2">
                 <div className="bg-slate-800 rounded-lg shadow-xl border border-slate-700 overflow-hidden">
@@ -278,18 +291,6 @@ export const FolderTab: React.FC<FolderTabProps> = ({
           </motion.div>
         )}
       </AnimatePresence>
-
-      {isActive && !isRenaming && (
-        <CustomTooltip content="Delete folder">
-          <Button
-            variant="ghost" size="icon"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-            onClick={handleDeleteClickInternal} disabled={isDeleting} aria-label="Delete folder"
-          >
-            <Trash2 size={16} /> {/* Changed from X to Trash2 for delete icon */}
-          </Button>
-        </CustomTooltip>
-      )}
 
       <ConfirmationDialog
         isOpen={showDeleteDialog}

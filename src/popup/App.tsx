@@ -79,25 +79,50 @@ const App: React.FC = () => {
   const handleFolderRename = async (folderId: string, newName: string) => {
     const trimmedName = newName.trim();
     if (!trimmedName) {
-      setFolderError('Folder name cannot be empty.'); // Consider handling this error display within FolderTab
-      // You might want to throw an error here for FolderTab to catch and display
+      setFolderError('Folder name cannot be empty.');
       return;
     }
     if (trimmedName.length > 50) {
-      setFolderError('Folder name is too long (max 50 chars).'); // Consider handling this error display within FolderTab
-      // You might want to throw an error here for FolderTab to catch and display
+      setFolderError('Folder name is too long (max 50 chars).');
       return;
     }
-    setFolderError(null); // Clear app-level error if one was set by this flow
+    setFolderError(null);
     try {
-      const updatedFolders = folders.map(f =>
-        f.id === folderId ? { ...f, name: trimmedName } : f
-      );
+      let updatedFolders;
+      
+      // If this is a new folder (has a temporary ID), create a permanent ID
+      if (folderId.startsWith('temp-')) {
+        const newFolder = {
+          id: `folder-${Date.now()}`,
+          name: trimmedName,
+          emoji: folders.find(f => f.id === folderId)?.emoji || '📁',
+          createdAt: new Date().toISOString(),
+        };
+        // Remove the temp folder and add the new one
+        updatedFolders = [
+          newFolder,
+          ...folders.filter(f => f.id !== folderId)
+        ];
+        // Update active filter ID if it was set to the temp ID
+        if (activeFilterFolderId === folderId) {
+          setActiveFilterFolderId(newFolder.id);
+        }
+      } else {
+        // Just update the name of an existing folder
+        updatedFolders = folders.map(f =>
+          f.id === folderId ? { ...f, name: trimmedName } : f
+        );
+      }
+      
       setFolders(updatedFolders);
       await chrome.storage.local.set({ folders: updatedFolders });
+      
+      // Reset editing state after successful save
+      setEditingFolderId(null);
+      setEditingFolderName('');
     } catch (error) {
-      console.error('Failed to rename folder:', error);
-      setError('Failed to rename folder. Please try again.'); // Set general error for App.tsx to display if needed
+      console.error('Failed to save folder:', error);
+      setError('Failed to save folder. Please try again.');
     }
   };
 
@@ -143,21 +168,40 @@ const App: React.FC = () => {
     }
   };
 
+  // Handle canceling folder creation/editing
+  const handleCancelFolderEdit = useCallback((folderId: string | null) => {
+    // If it's a new folder that was being created (has a temporary ID)
+    if (folderId && folderId.startsWith('temp-')) {
+      // Remove the temporary folder from the list
+      const updatedFolders = folders.filter(f => f.id !== folderId);
+      setFolders(updatedFolders);
+      // Reset the active filter if it was set to this folder
+      if (activeFilterFolderId === folderId) {
+        setActiveFilterFolderId(null);
+      }
+    }
+    // Reset editing state
+    setEditingFolderId(null);
+    setEditingFolderName('');
+  }, [folders, activeFilterFolderId]);
+
   // Handle creation of a new folder
   const handleCreateNewFolder = useCallback(async () => {
-    // Basic validation for folder name length or uniqueness can be added here if needed
+    // Generate a temporary ID for the new folder
+    const tempId = `temp-folder-${Date.now()}`;
     const newFolder: Folder = {
-      id: `folder-${Date.now()}`,
-      name: `New Folder ${folders.length + 1}`, // Default name
+      id: tempId,
+      name: '', // Start with empty name (user will type it)
       emoji: '📁', // Default emoji
       createdAt: new Date().toISOString(),
     };
-    const updatedFolders = [newFolder, ...folders].sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    
+    // Add the new folder to the list and set it as active
+    const updatedFolders = [newFolder, ...folders];
     setFolders(updatedFolders);
-    await chrome.storage.local.set({ folders: updatedFolders });
-    setActiveFilterFolderId(newFolder.id); // Set new folder as active
-    setEditingFolderId(newFolder.id); // Optionally start editing the new folder's name
-    setEditingFolderName(newFolder.name);
+    setActiveFilterFolderId(tempId);
+    setEditingFolderId(tempId); // Start editing the new folder's name
+    setEditingFolderName('');
   }, [folders]);
 
   // Get folder by ID helper function
@@ -294,7 +338,7 @@ const App: React.FC = () => {
           onAddNewFolder={handleCreateNewFolder}
           isEditingOrCreatingFolder={!!editingFolderId} 
           editingFolderId={editingFolderId} 
-          onCancelRename={() => setEditingFolderId(null)}
+          onCancelRename={handleCancelFolderEdit}
         />
         <main className="flex-1 p-4 overflow-auto flex flex-col pt-2"> {/* Added pt-2 for spacing below tabs */}
           <div className="flex justify-between items-center mb-4">
