@@ -77,27 +77,34 @@ function MagnetizeButton({
             onTouchEnd={handleInteractionEnd}
             {...props}
         >
-            {particles.map((_, index) => (
-                <motion.div
-                    key={index}
-                    custom={index}
-                    initial={{ x: particles[index].x, y: particles[index].y }}
-                    animate={particlesControl}
-                    className={cn(
-                        "absolute w-2 h-2 rounded-full",
-                        "bg-white/80",
-                        "transition-all duration-300 ease-out",
-                        isAttracting ? "opacity-100 scale-100" : "opacity-0 scale-50"
-                    )}
-                />
-            ))}
             <span className="relative w-full flex items-center justify-center gap-2">
-                <Plus
-                    className={cn(
-                        "w-4 h-4 transition-transform duration-300",
-                        isAttracting ? "scale-110 rotate-90" : "rotate-0"
-                    )}
-                />
+                <div className="relative flex items-center justify-center w-6 h-6">
+                    <div className="absolute inset-0 flex items-center justify-center">
+                        {particles.map((_, index) => (
+                            <motion.div
+                                key={index}
+                                custom={index}
+                                initial={{ x: particles[index].x, y: particles[index].y }}
+                                animate={particlesControl}
+                                className={cn(
+                                    "absolute w-2 h-2 rounded-full",
+                                    "bg-white/80",
+                                    "transition-all duration-300 ease-out",
+                                    isAttracting ? "opacity-100 scale-100" : "opacity-0 scale-50"
+                                )}
+                                style={{
+                                    transformOrigin: 'center',
+                                }}
+                            />
+                        ))}
+                    </div>
+                    <Plus
+                        className={cn(
+                            "w-4 h-4 transition-transform duration-300 relative z-10",
+                            isAttracting ? "scale-110 rotate-90" : "rotate-0"
+                        )}
+                    />
+                </div>
                 {props.children}
             </span>
         </Button>
