@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { CustomTooltip } from '@/components/ui/custom-tooltip';
 import { Edit3, Copy, Check, Star, Trash2 } from 'lucide-react';
 import type { Snippet } from '@/utils/types';
 import { cn } from '@/lib/utils';
@@ -40,61 +40,55 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
       <div className="flex justify-between items-start mb-1">
         <h3 className="text-md font-semibold text-sky-400">{snippet.title || 'Untitled Snippet'}</h3>
         <div className="flex items-center space-x-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-slate-400 hover:text-yellow-400"
-                onClick={() => onPinSnippet(snippet.id)}
-              >
-                <Star size={14} className={cn(snippet.isPinned && 'text-yellow-400 fill-yellow-400')} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent><p>{snippet.isPinned ? 'Unpin' : 'Pin'} Snippet</p></TooltipContent>
-          </Tooltip>
+          <CustomTooltip content={snippet.isPinned ? 'Unpin Snippet' : 'Pin Snippet'} side="bottom">
+  <Button
+    variant="ghost"
+    size="icon"
+    className="h-7 w-7 text-slate-400 hover:text-yellow-400"
+    onClick={() => onPinSnippet(snippet.id)}
+  >
+    <Star size={14} className={cn(snippet.isPinned && 'text-yellow-400 fill-yellow-400')} />
+  </Button>
+</CustomTooltip>
+          <CustomTooltip content="Edit" side="bottom">
+  <Button
+    variant="ghost"
+    size="icon"
+    className="h-7 w-7 text-slate-400 hover:text-blue-400"
+    onClick={() => onOpenEditModal(snippet)}
+    aria-label="Edit snippet"
+  >
+    <Edit3 size={14} />
+  </Button>
+</CustomTooltip>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-slate-400 hover:text-sky-400"
-                onClick={() => onOpenEditModal(snippet)}
-              >
-                <Edit3 size={14} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent><p>Edit Snippet</p></TooltipContent>
-          </Tooltip>
+          <CustomTooltip content={copiedSnippetId === snippet.id ? 'Copied!' : 'Copy to clipboard'} side="bottom">
+  <Button
+    variant="ghost"
+    size="icon"
+    className="h-7 w-7 text-slate-400 hover:text-green-400"
+    onClick={() => onCopyToClipboard(snippet.text, snippet.id)}
+    aria-label="Copy snippet"
+  >
+    {copiedSnippetId === snippet.id ? (
+      <Check size={14} className="text-green-400" />
+    ) : (
+      <Copy size={14} />
+    )}
+  </Button>
+</CustomTooltip>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-slate-400 hover:text-sky-400"
-                onClick={() => onCopyToClipboard(snippet.text, snippet.id)}
-              >
-                {copiedSnippetId === snippet.id ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent><p>{copiedSnippetId === snippet.id ? 'Copied!' : 'Copy Snippet'}</p></TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-red-500 hover:text-red-400"
-                onClick={() => onDeleteSnippet(snippet.id)}
-              >
-                <Trash2 size={14} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent><p>Delete Snippet</p></TooltipContent>
-          </Tooltip>
+          <CustomTooltip content="Delete" side="bottom">
+  <Button
+    variant="ghost"
+    size="icon"
+    className="h-7 w-7 text-slate-400 hover:text-red-400"
+    onClick={() => onDeleteSnippet(snippet.id)}
+    aria-label="Delete snippet"
+  >
+    <Trash2 size={14} />
+  </Button>
+</CustomTooltip>
         </div>
       </div>
       <div className="text-xs text-slate-500 mb-2 flex items-center space-x-2 flex-wrap">

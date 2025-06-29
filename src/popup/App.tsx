@@ -5,7 +5,7 @@ import { FolderTabs } from './components/FolderTabs'; // Import FolderTabs
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { CustomTooltip } from '@/components/ui/custom-tooltip';
 import type { Snippet, Folder } from '../utils/types';
 import { SnippetFormModal } from './components/SnippetFormModal';
 import { SnippetItem } from './components/SnippetItem';
@@ -355,7 +355,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <TooltipProvider>
+    <>
       <div className="h-screen bg-background text-slate-100 flex flex-col">
                 <FolderTabs
           folders={folders}
@@ -459,7 +459,7 @@ const App: React.FC = () => {
           snippetToEdit={editingSnippet}
         />
       )}
-    </TooltipProvider>
+    </>
   );
 };
 

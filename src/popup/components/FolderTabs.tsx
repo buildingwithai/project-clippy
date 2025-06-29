@@ -4,7 +4,7 @@ import type { Folder } from '../../utils/types';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { List, FolderPlus, FilePlus, Settings } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { CustomTooltip } from '@/components/ui/custom-tooltip';
 import { FolderTab } from './FolderTab';
 
 import { useDockEffect } from '@/hooks/useDockEffect';
@@ -104,26 +104,21 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
             }
           `
         }} />
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                'p-1.5 h-7 w-7 flex items-center justify-center rounded-md',
-                activeFilterFolderId === null
-                  ? 'bg-sky-700 text-sky-100 hover:bg-sky-600'
-                  : 'text-slate-300 hover:bg-slate-700 hover:text-slate-100'
-              )}
-              onClick={() => setActiveFilterFolderId(null)}
-            >
-              <List size={14} className="shrink-0" />
-            </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom"><p>Show all snippets</p></TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <CustomTooltip content="Show all snippets" side="bottom">
+  <Button
+    variant="ghost"
+    size="sm"
+    className={cn(
+      'p-1.5 h-7 w-7 flex items-center justify-center rounded-md',
+      activeFilterFolderId === null
+        ? 'bg-sky-700 text-sky-100 hover:bg-sky-600'
+        : 'text-slate-300 hover:bg-slate-700 hover:text-slate-100'
+    )}
+    onClick={() => setActiveFilterFolderId(null)}
+  >
+    <List size={14} className="shrink-0" />
+  </Button>
+</CustomTooltip>
 
         <LayoutGroup>
           {folders.map((folder, index) => (
@@ -154,57 +149,32 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
       </div>
       {/* Action buttons container */}
       <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10 flex items-center space-x-1">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="p-1.5 h-7 w-7"
-                onClick={onAddNewFolder}
-                disabled={isEditingOrCreatingFolder}
-              >
-                <FolderPlus size={16} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom"><p>New Folder</p></TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="p-1.5 h-7 w-7"
-                onClick={onAddNewSnippet}
-              >
-                <FilePlus size={16} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom"><p>New Snippet</p></TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-        <TooltipProvider>
-          <Tooltip
-            open={showSettingsTooltip}
-            onOpenChange={(isOpen) => {
-              if (!isOpen && showSettingsTooltip) {
-                setShowSettingsTooltip(false);
-                chrome.storage.local.set({ hasSeenSettingsTooltip: true });
-              }
-            }}
-          >
-            <TooltipTrigger asChild>
-              <button onClick={handleSettingsInteraction} className="p-1.5 text-slate-400 hover:text-white transition-colors rounded-md hover:bg-slate-700/50">
-                <Settings size={16} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" align="end">
-              <p>{showSettingsTooltip ? "Manage hotkeys and settings here!" : "Settings"}</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <CustomTooltip content="New Folder" side="bottom">
+  <Button
+    variant="ghost"
+    size="sm"
+    className="p-1.5 h-7 w-7"
+    onClick={onAddNewFolder}
+    disabled={isEditingOrCreatingFolder}
+  >
+    <FolderPlus size={16} />
+  </Button>
+</CustomTooltip>
+        <CustomTooltip content="New Snippet" side="bottom">
+  <Button
+    variant="ghost"
+    size="sm"
+    className="p-1.5 h-7 w-7"
+    onClick={onAddNewSnippet}
+  >
+    <FilePlus size={16} />
+  </Button>
+</CustomTooltip>
+        <CustomTooltip content={showSettingsTooltip ? "Manage hotkeys and settings here!" : "Settings"} side="bottom">
+  <button onClick={handleSettingsInteraction} className="p-1.5 text-slate-400 hover:text-white transition-colors rounded-md hover:bg-slate-700/50">
+    <Settings size={16} />
+  </button>
+</CustomTooltip>
       </div>
     </div>
   );
