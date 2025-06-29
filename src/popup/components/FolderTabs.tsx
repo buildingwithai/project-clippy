@@ -80,7 +80,7 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
     >
       {/* Scrollable container for tabs */}
       <div 
-        className="flex-grow flex items-center space-x-1 overflow-x-auto pr-10"
+        className="flex-grow flex items-center space-x-0.5 overflow-x-auto pr-10"
         style={{
           scrollbarWidth: 'thin',
           scrollbarColor: '#4B5563 #1F2937', // slate-600 / slate-800
@@ -127,11 +127,11 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
               ref={getItemRef(index)}
               style={{
                 scale: scales[index] || 1,
-                transformOrigin: 'bottom center',
-                transition: 'transform 0.2s ease-out',
+                transformOrigin: 'center', // Center scaling
+                transition: 'transform 0.15s ease-out',
                 zIndex: activeFilterFolderId === folder.id ? 10 : 1,
               }}
-              className="flex items-center"
+              className="folder-tab flex items-center mx-0 p-0.5"
             >
               <FolderTab
                 folder={folder}
@@ -148,7 +148,7 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
         </LayoutGroup>
       </div>
       {/* Action buttons container */}
-      <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10 flex items-center space-x-1">
+      <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10 flex items-center space-x-0.5">
         <CustomTooltip content="New Folder" side="bottom">
   <Button
     variant="ghost"
