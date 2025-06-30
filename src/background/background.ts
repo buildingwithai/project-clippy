@@ -177,7 +177,8 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
 });
 
 async function handlePasteRequest(snippet: Snippet) {
-  const sanitizedText = DOMPurify.sanitize(snippet.text);
+  // DOMPurify is not available in the background service worker; use plain text
+  const sanitizedText = snippet.text;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return;
 
@@ -187,10 +188,7 @@ async function handlePasteRequest(snippet: Snippet) {
     func: () => document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement || (document.activeElement as HTMLElement).isContentEditable,
   });
 
-  const isEditable = injectionResults.some(frame => frame.result);
-
-  if (isEditable) {
-    // If editable, paste the text directly
+  if (injectionResults.some((r: any) => r.result)) {
     chrome.scripting.executeScript({
       target: { tabId: tab.id, allFrames: true },
       func: pasteTextInActiveElement,
@@ -233,7 +231,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   }
 });
 
-chrome.commands.onCommand.addListener((command, tab) => {
+chrome.commands.onCommand.addListener(async (command, tab) => {
   if (command === 'toggle-overlay' && tab?.id) {
     console.log(`Command '${command}' triggered on tab ${tab.id}`);
 
@@ -253,6 +251,41 @@ chrome.commands.onCommand.addListener((command, tab) => {
       target: { tabId: tab.id },
       func: toggleOverlay,
     }).catch(err => console.error('Failed to inject script:', err));
+    return;
+  }
+
+  // Handle hotkey-1, hotkey-2, etc. commands
+  if (/^hotkey-\d+$/.test(command) && tab?.id) {
+    const slot = command; // e.g., 'hotkey-1'
+    console.log(`[Clippy] Hotkey command received: ${command} (slot: ${slot}) on tab ${tab.id}`);
+    const result = await chrome.storage.local.get(['hotkeyMappings', 'snippets']);
+    const hotkeyMappings = result.hotkeyMappings || [];
+    const snippets: Snippet[] = result.snippets || [];
+    const mapping = hotkeyMappings.find((m: any) => m.slot === slot);
+    if (!mapping || !mapping.snippetId) {
+      console.warn(`[Clippy] No snippet mapped for slot ${slot}`);
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon48.png',
+        title: 'Clippy',
+        message: `No snippet mapped for ${slot}. Set it in Clippy Options.`,
+      });
+      return;
+    }
+    const snippet = snippets.find(s => s.id === mapping.snippetId);
+    if (!snippet) {
+      console.warn(`[Clippy] Snippet with ID ${mapping.snippetId} not found for slot ${slot}`);
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon48.png',
+        title: 'Clippy',
+        message: `Snippet not found.`,
+      });
+      return;
+    }
+    // Paste the snippet
+    console.log(`[Clippy] Pasting snippet for slot ${slot}:`, snippet);
+    handlePasteRequest(snippet);
   }
 });
 
