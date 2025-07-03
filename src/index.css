@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Prevent any overlay, shadow, or outline on folder tabs */
+.folder-tab, .folder-tab * {
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+  vertical-align: middle !important;
+}
+
 body {
   font-family: 'Inter', sans-serif;
   /* Apply dark theme globally if not using class-based toggling */

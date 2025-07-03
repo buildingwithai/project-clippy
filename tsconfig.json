@@ -20,6 +20,16 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src"],
+  "include": [
+    "src/popup",
+    "src/background",
+    "src/content",
+    "src/lib",
+    "src/styles",
+    "src/overlay",
+    "src/options",
+    "src/components",
+    "src/hooks"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

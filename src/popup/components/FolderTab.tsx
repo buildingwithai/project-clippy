@@ -186,11 +186,10 @@ export const FolderTab: React.FC<FolderTabProps> = ({
       <motion.div
         layout
         className={cn(
-          'group relative flex items-center h-8 rounded-md transition-all duration-300 flex-shrink-0',
-          isActive ? 'bg-slate-700' : 'hover:bg-slate-700/50',
-          isRenaming && 'z-10 bg-slate-700 shadow-lg',
-          'min-w-[40px]', // Ensure minimum width for the tab
-          'origin-bottom' // For smooth scaling from the bottom
+          'group relative flex items-center h-8 min-w-[32px] origin-bottom m-0 p-0 flex-shrink-0',
+          'bg-transparent shadow-none outline-none', // Force no overlay
+          isActive ? 'text-sky-100' : 'text-slate-300 hover:text-sky-300',
+          isRenaming && 'z-10 bg-slate-700 shadow-lg' // Only apply bg/shadow when renaming
         )}
         style={{
           maxWidth: '200px', // Prevent tabs from getting too wide

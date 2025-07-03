@@ -25,10 +25,40 @@
     "service_worker": "background/background.js",
     "type": "module"
   },
+  "options_ui": {
+    "page": "src/options/index.html",
+    "open_in_tab": true
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
       "js": ["content/content.js"]
     }
-  ]
+  ],
+  "commands": {
+    "hotkey-1": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+1"
+      },
+      "description": "Activate snippet hotkey 1"
+    },
+    "hotkey-2": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+2"
+      },
+      "description": "Activate snippet hotkey 2"
+    },
+    "hotkey-3": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+3"
+      },
+      "description": "Activate snippet hotkey 3"
+    },
+    "hotkey-4": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+4"
+      },
+      "description": "Activate snippet hotkey 4"
+    }
+  }
 }

@@ -5,9 +5,10 @@ import { FolderTabs } from './components/FolderTabs'; // Import FolderTabs
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { CustomTooltip } from '@/components/ui/custom-tooltip';
 import type { Snippet, Folder } from '../utils/types';
 import { SnippetFormModal } from './components/SnippetFormModal';
+import { SnippetItem } from './components/SnippetItem';
 
 const App: React.FC = () => {
   // State for snippets and folders
@@ -211,14 +212,24 @@ const App: React.FC = () => {
   };
 
   // Calculate filtered snippets based on search term and active folder
-  const finalFilteredSnippets = React.useMemo(() => {
-    return snippets.filter(snippet => {
+  const { pinnedSnippets, otherSnippets } = React.useMemo(() => {
+    const filtered = snippets.filter(snippet => {
       const matchesSearch = searchTerm === '' ||
         snippet.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         snippet.text.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesFolder = activeFilterFolderId === null || snippet.folderId === activeFilterFolderId;
       return matchesSearch && matchesFolder;
-    }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    });
+
+    const pinned = filtered
+      .filter(s => s.isPinned)
+      .sort((a, b) => new Date(b.pinnedAt!).getTime() - new Date(a.pinnedAt!).getTime());
+
+    const others = filtered
+      .filter(s => !s.isPinned)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return { pinnedSnippets: pinned, otherSnippets: others };
   }, [snippets, searchTerm, activeFilterFolderId]);
 
   // Get current display title for the snippet list
@@ -307,6 +318,24 @@ const App: React.FC = () => {
     await chrome.storage.local.set({ snippets: updatedSnippets });
   };
 
+  // Handle pinning a snippet
+  const handlePinSnippet = async (snippetId: string) => {
+    try {
+      const updatedSnippets = snippets.map(s =>
+        s.id === snippetId
+          ? { ...s, isPinned: !s.isPinned, pinnedAt: !s.isPinned ? new Date().toISOString() : undefined }
+          : s
+      );
+      setSnippets(updatedSnippets); // Optimistic update
+      await chrome.storage.local.set({ snippets: updatedSnippets });
+    } catch (error) {
+      console.error('Failed to pin snippet:', error);
+      setError('Failed to update pin status. Please try again.');
+      // Optional: Revert optimistic update on error
+      loadSnippetsAndFolders();
+    }
+  };
+
   // Loading and error states
   if (isLoading) {
     return (
@@ -326,9 +355,9 @@ const App: React.FC = () => {
   }
 
   return (
-    <TooltipProvider>
+    <>
       <div className="h-screen bg-background text-slate-100 flex flex-col">
-        <FolderTabs
+                <FolderTabs
           folders={folders}
           activeFilterFolderId={activeFilterFolderId}
           setActiveFilterFolderId={setActiveFilterFolderId}
@@ -336,16 +365,14 @@ const App: React.FC = () => {
           onRenameFolder={handleFolderRename}
           onEmojiChange={handleEmojiChange}
           onAddNewFolder={handleCreateNewFolder}
-          isEditingOrCreatingFolder={!!editingFolderId} 
-          editingFolderId={editingFolderId} 
+          onAddNewSnippet={handleOpenNewSnippetModal}
+          isEditingOrCreatingFolder={!!editingFolderId}
+          editingFolderId={editingFolderId}
           onCancelRename={handleCancelFolderEdit}
         />
         <main className="flex-1 p-4 overflow-auto flex flex-col pt-2"> {/* Added pt-2 for spacing below tabs */}
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-semibold text-sky-400">{currentDisplayTitle}</h2>
-            <Button onClick={handleOpenNewSnippetModal} size="sm">
-              <Plus className="mr-2 h-4 w-4" /> New Snippet
-            </Button>
           </div>
 
           <div className="mb-4">
@@ -358,7 +385,7 @@ const App: React.FC = () => {
             />
           </div>
 
-          {finalFilteredSnippets.length === 0 && !isLoading && (
+          {pinnedSnippets.length === 0 && otherSnippets.length === 0 && !isLoading && (
             <div className="text-center text-slate-400 py-8 flex-grow flex flex-col items-center justify-center">
               <p className="text-lg">No snippets found.</p>
               {activeFilterFolderId && folders.find(f => f.id === activeFilterFolderId) && (
@@ -376,51 +403,48 @@ const App: React.FC = () => {
           )}
 
           <ScrollArea className="flex-grow">
-            <div className="space-y-3">
-              {finalFilteredSnippets.map((snippet) => (
-                <div key={snippet.id} className="bg-slate-800 p-3 rounded-lg shadow hover:shadow-md hover:shadow-sky-600/30 transition-shadow">
-                  <div className="flex justify-between items-start mb-1">
-                    <h3 className="text-md font-semibold text-sky-400">{snippet.title || 'Untitled Snippet'}</h3>
-                    <div className="flex items-center space-x-1">
-                       <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-sky-400" onClick={() => handleOpenEditSnippetModal(snippet)}>
-                            <Edit3 size={14} />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent><p>Edit Snippet</p></TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                           <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-sky-400" onClick={() => handleCopyToClipboard(snippet.text, snippet.id)}>
-                            {copiedSnippetId === snippet.id ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent><p>{copiedSnippetId === snippet.id ? 'Copied!' : 'Copy Snippet'}</p></TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-400" onClick={() => handleDeleteSnippet(snippet.id)}>
-                            <Trash2 size={14} />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent><p>Delete Snippet</p></TooltipContent>
-                      </Tooltip>
-                    </div>
+            <div className="space-y-4">
+              {/* Pinned Section */}
+              {pinnedSnippets.length > 0 && (
+                <section>
+                  <h3 className="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-2">Pinned</h3>
+                  <div className="space-y-3">
+                    {pinnedSnippets.map((snippet) => (
+                      <SnippetItem
+                        key={snippet.id}
+                        snippet={snippet}
+                        copiedSnippetId={copiedSnippetId}
+                        onCopyToClipboard={handleCopyToClipboard}
+                        onOpenEditModal={handleOpenEditSnippetModal}
+                        onPinSnippet={handlePinSnippet}
+                        onDeleteSnippet={handleDeleteSnippet}
+                        getFolderById={getFolderById}
+                      />
+                    ))}
                   </div>
-                  <div className="text-xs text-slate-500 mb-2 flex items-center space-x-2">
-                    <span>Created: {new Date(snippet.createdAt).toLocaleDateString()}</span>
-                    {snippet.folderId && getFolderById(snippet.folderId) && (
-                      <span className="flex items-center">
-                        | Folder: {getFolderById(snippet.folderId)?.emoji} {getFolderById(snippet.folderId)?.name}
-                      </span>
-                    )}
-                    {snippet.frequency && snippet.frequency > 0 ? <span>| Used: {snippet.frequency} times</span> : ''}
-                    {snippet.lastUsed ? <span>| Last Used: {new Date(snippet.lastUsed).toLocaleDateString()}</span> : ''}
+                </section>
+              )}
+
+              {/* Other Snippets Section */}
+              {otherSnippets.length > 0 && (
+                <section>
+                  {pinnedSnippets.length > 0 && <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2 pt-2">All Snippets</h3>}
+                  <div className="space-y-3">
+                    {otherSnippets.map((snippet) => (
+                      <SnippetItem
+                        key={snippet.id}
+                        snippet={snippet}
+                        copiedSnippetId={copiedSnippetId}
+                        onCopyToClipboard={handleCopyToClipboard}
+                        onOpenEditModal={handleOpenEditSnippetModal}
+                        onPinSnippet={handlePinSnippet}
+                        onDeleteSnippet={handleDeleteSnippet}
+                        getFolderById={getFolderById}
+                      />
+                    ))}
                   </div>
-                  <pre className="text-sm text-slate-300 bg-slate-900/50 p-2.5 rounded-md whitespace-pre-wrap break-all max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">{snippet.text}</pre>
-                </div>
-              ))}
+                </section>
+              )}
             </div>
           </ScrollArea>
         </main>
@@ -435,7 +459,7 @@ const App: React.FC = () => {
           snippetToEdit={editingSnippet}
         />
       )}
-    </TooltipProvider>
+    </>
   );
 };
 

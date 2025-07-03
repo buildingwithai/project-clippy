@@ -3,9 +3,12 @@
  * Handles context menu creation and other background tasks.
  */
 import type { Snippet } from '@/utils/types';
+import DOMPurify from 'dompurify';
+import { runMigrations } from './migration';
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async () => {
   console.log('Project Clippy extension installed.');
+  await runMigrations();
   initializeContextMenus();
   updatePasteContextMenu(); // Initial setup
 });
@@ -158,11 +161,183 @@ function populatePasteSubmenuItems() {
   });
 }
 
+chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
+  if (request.type === 'PASTE_SNIPPET' && sender.origin === chrome.runtime.getURL('').slice(0, -1)) {
+    handlePasteRequest(request.snippet);
+  } else if (request.type === 'PASTE_SNIPPET_BY_ID') {
+    const { snippetId } = request;
+    const result = await chrome.storage.local.get('snippets');
+    const snippets: Snippet[] = result.snippets || [];
+    const snippetToPaste = snippets.find(s => s.id === snippetId);
+    if (snippetToPaste) {
+      handlePasteRequest(snippetToPaste);
+    }
+  }
+  return true; // Keep channel open for async responses
+});
+
+async function handlePasteRequest(snippet: Snippet) {
+  // DOMPurify is not available in the background service worker; use plain text
+  const sanitizedText = snippet.text;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return;
+
+  // First, check if the active element is editable
+  const injectionResults = await chrome.scripting.executeScript({
+    target: { tabId: tab.id, allFrames: true },
+    func: () => document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement || (document.activeElement as HTMLElement).isContentEditable,
+  });
+
+  if (injectionResults.some((r: any) => r.result)) {
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      func: pasteTextInActiveElement,
+      args: [sanitizedText],
+    }).catch(err => console.error('Error pasting text:', err));
+  } else {
+    // If not editable, or if it's the address bar, copy to clipboard and notify
+    await copyToClipboardAndNotify(sanitizedText, 'Pasted to clipboard!');
+    // If it looks like a URL, try to navigate
+    if (sanitizedText.startsWith('http://') || sanitizedText.startsWith('https://')) {
+      chrome.tabs.update(tab.id, { url: sanitizedText });
+    }
+  }
+}
+
+async function copyToClipboardAndNotify(text: string, message: string) {
+  try {
+    // Use the offscreen document to write to the clipboard
+    await chrome.scripting.executeScript({
+      target: { tabId: (await chrome.tabs.query({ active: true, currentWindow: true }))[0].id! },
+      func: (textToCopy) => navigator.clipboard.writeText(textToCopy),
+      args: [text],
+    });
+
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon48.png',
+      title: 'Clippy',
+      message: message,
+    });
+  } catch (err) {
+    console.error('Failed to copy to clipboard:', err);
+  }
+}
+
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local' && changes.snippets) {
     updatePasteContextMenu();
     chrome.runtime.sendMessage({ action: 'snippetSaved' }).catch((e: unknown) => console.log("Popup not open or error sending message:", e));
   }
 });
+
+chrome.commands.onCommand.addListener(async (command, tab) => {
+  if (command === 'toggle-overlay' && tab?.id) {
+    console.log(`Command '${command}' triggered on tab ${tab.id}`);
+
+    // Prevent injection on special pages
+    if (tab.url?.startsWith('chrome://')) {
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon48.png',
+        title: 'Clippy Action',
+        message: "Clippy cannot be used on this special Chrome page."
+      });
+      return;
+    }
+
+    // Inject the content script to toggle the overlay
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: toggleOverlay,
+    }).catch(err => console.error('Failed to inject script:', err));
+    return;
+  }
+
+  // Handle hotkey-1, hotkey-2, etc. commands
+  if (/^hotkey-\d+$/.test(command) && tab?.id) {
+    const slot = command; // e.g., 'hotkey-1'
+    console.log(`[Clippy] Hotkey command received: ${command} (slot: ${slot}) on tab ${tab.id}`);
+    const result = await chrome.storage.local.get(['hotkeyMappings', 'snippets']);
+    const hotkeyMappings = result.hotkeyMappings || [];
+    const snippets: Snippet[] = result.snippets || [];
+    const mapping = hotkeyMappings.find((m: any) => m.slot === slot);
+    if (!mapping || !mapping.snippetId) {
+      console.warn(`[Clippy] No snippet mapped for slot ${slot}`);
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon48.png',
+        title: 'Clippy',
+        message: `No snippet mapped for ${slot}. Set it in Clippy Options.`,
+      });
+      return;
+    }
+    const snippet = snippets.find(s => s.id === mapping.snippetId);
+    if (!snippet) {
+      console.warn(`[Clippy] Snippet with ID ${mapping.snippetId} not found for slot ${slot}`);
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon48.png',
+        title: 'Clippy',
+        message: `Snippet not found.`,
+      });
+      return;
+    }
+    // Paste the snippet
+    console.log(`[Clippy] Pasting snippet for slot ${slot}:`, snippet);
+    handlePasteRequest(snippet);
+  }
+});
+
+/**
+ * Injected into the active page to toggle the search overlay.
+ * This function creates a host element, attaches a shadow DOM, and injects an
+ * iframe pointing to the React-based overlay application.
+ */
+function toggleOverlay() {
+  const CONTAINER_ID = 'clippy-search-overlay-container';
+
+  // If the overlay exists, remove it and focus the body
+  const existingContainer = document.getElementById(CONTAINER_ID);
+  if (existingContainer) {
+    existingContainer.remove();
+    window.focus(); // Return focus to the main page
+    return;
+  }
+
+  // Create the host container for the shadow DOM
+  const host = document.createElement('div');
+  host.id = CONTAINER_ID;
+  document.body.appendChild(host);
+
+  // Create a shadow root
+  const shadowRoot = host.attachShadow({ mode: 'open' });
+
+  // Create the iframe that will host the React app
+  const iframe = document.createElement('iframe');
+  iframe.src = chrome.runtime.getURL('overlay/index.html');
+  Object.assign(iframe.style, {
+    width: '100vw',
+    height: '100vh',
+    border: 'none',
+    position: 'fixed',
+    top: '0',
+    left: '0',
+    zIndex: '2147483647',
+  });
+
+  // Append the iframe to the shadow root
+  shadowRoot.appendChild(iframe);
+
+  // Add a listener to remove the overlay when a message is received from the iframe
+  const messageListener = (event: MessageEvent) => {
+    if (event.source === iframe.contentWindow && event.data.type === 'CLOSE_CLIPPY_OVERLAY') {
+      host.remove();
+      window.removeEventListener('message', messageListener);
+    }
+  };
+
+  window.addEventListener('message', messageListener);
+}
 
 console.log('Background script loaded. Context menus initialized.');
