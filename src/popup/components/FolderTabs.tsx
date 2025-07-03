@@ -3,11 +3,9 @@ import { LayoutGroup, motion, AnimatePresence } from 'framer-motion';
 import type { Folder } from '../../utils/types';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { List, FolderPlus, FilePlus, Settings } from 'lucide-react';
+import { List, FolderPlus, Settings } from 'lucide-react';
 import { CustomTooltip } from '@/components/ui/custom-tooltip';
 import { FolderTab } from './FolderTab';
-
-import { useDockEffect } from '@/hooks/useDockEffect';
 
 interface FolderTabsProps {
   folders: Folder[];
@@ -17,7 +15,6 @@ interface FolderTabsProps {
   onRenameFolder: (folderId: string, newName: string) => Promise<void>;
   onEmojiChange: (folderId: string, emoji: string) => Promise<void>;
   onAddNewFolder: () => void; // For initiating new folder creation
-  onAddNewSnippet: () => void; // For initiating new snippet creation
   isEditingOrCreatingFolder: boolean; // To disable add button during edits
   editingFolderId: string | null; // ID of the folder being edited/created
   onCancelRename: (folderId: string | null) => void; // Handler for cancelling edit/creation
@@ -31,7 +28,6 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
   onRenameFolder,
   onEmojiChange,
   onAddNewFolder,
-  onAddNewSnippet,
   isEditingOrCreatingFolder,
   editingFolderId,
   onCancelRename,
@@ -64,18 +60,10 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
     }
   }, [activeFilterFolderId, onDeleteFolder, setActiveFilterFolderId]);
 
-  // Use the dock effect hook
-  const dockRef = useRef<HTMLDivElement>(null);
-  const { scales, getItemRef } = useDockEffect({
-    itemCount: folders.length,
-    baseSize: 32, // Base size of the folder icons
-    maxScale: 1.4, // Maximum scale on hover
-    effectWidth: 200, // Width of the hover effect area
-  });
+  // Removed dock effect hook to eliminate upward motion
 
   return (
     <div 
-      ref={dockRef}
       className="relative flex items-center h-12 min-h-[3rem] px-2 py-1 bg-slate-800 border-b border-slate-700/70 overflow-hidden"
     >
       {/* Scrollable container for tabs */}
@@ -86,7 +74,6 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
           scrollbarColor: '#4B5563 #1F2937', // slate-600 / slate-800
           maskImage: 'linear-gradient(to right, black calc(100% - 40px), transparent 100%)',
           WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 40px), transparent 100%)',
-          paddingBottom: '4px', // Add some padding at the bottom for the dock effect
         }}
       >
         {/* Custom scrollbar styles for WebKit browsers */}
@@ -121,16 +108,9 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
 </CustomTooltip>
 
         <LayoutGroup>
-          {folders.map((folder, index) => (
+          {folders.map((folder) => (
             <motion.div
               key={folder.id}
-              ref={getItemRef(index)}
-              style={{
-                scale: scales[index] || 1,
-                transformOrigin: 'center', // Center scaling
-                transition: 'transform 0.15s ease-out',
-                zIndex: activeFilterFolderId === folder.id ? 10 : 1,
-              }}
               className="folder-tab flex items-center mx-0 p-0.5"
             >
               <FolderTab
@@ -145,36 +125,47 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
               />
             </motion.div>
           ))}
+
+          {/* New Folder Icon - Inline with folders */}
+          <motion.div
+            className="folder-tab flex items-center mx-0 p-0.5"
+            initial={{ opacity: 0.6, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <CustomTooltip content={folders.length === 0 ? "📁+ Create first folder" : "New folder"} side="bottom">
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  'p-1.5 h-7 w-auto px-2 flex items-center justify-center rounded-md transition-all duration-200',
+                  'text-slate-400 hover:text-slate-100 hover:bg-slate-700',
+                  'border border-slate-600/30 hover:border-slate-500/50',
+                  'opacity-60 hover:opacity-100'
+                )}
+                onClick={onAddNewFolder}
+                disabled={isEditingOrCreatingFolder}
+              >
+                {folders.length === 0 ? (
+                  <span className="flex items-center space-x-1 text-xs">
+                    <span>📁</span>
+                    <span>+</span>
+                  </span>
+                ) : (
+                  <FolderPlus size={14} />
+                )}
+              </Button>
+            </CustomTooltip>
+          </motion.div>
         </LayoutGroup>
       </div>
-      {/* Action buttons container */}
-      <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10 flex items-center space-x-0.5">
-        <CustomTooltip content="New Folder" side="bottom">
-  <Button
-    variant="ghost"
-    size="sm"
-    className="p-1.5 h-7 w-7"
-    onClick={onAddNewFolder}
-    disabled={isEditingOrCreatingFolder}
-  >
-    <FolderPlus size={16} />
-  </Button>
-</CustomTooltip>
-        <CustomTooltip content="New Snippet" side="bottom">
-  <Button
-    variant="ghost"
-    size="sm"
-    className="p-1.5 h-7 w-7"
-    onClick={onAddNewSnippet}
-  >
-    <FilePlus size={16} />
-  </Button>
-</CustomTooltip>
+      {/* Settings button - only system action remains in corner */}
+      <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10">
         <CustomTooltip content={showSettingsTooltip ? "Manage hotkeys and settings here!" : "Settings"} side="bottom">
-  <button onClick={handleSettingsInteraction} className="p-1.5 text-slate-400 hover:text-white transition-colors rounded-md hover:bg-slate-700/50">
-    <Settings size={16} />
-  </button>
-</CustomTooltip>
+          <button onClick={handleSettingsInteraction} className="p-1.5 text-slate-400 hover:text-white transition-colors rounded-md hover:bg-slate-700/50">
+            <Settings size={16} />
+          </button>
+        </CustomTooltip>
       </div>
     </div>
   );

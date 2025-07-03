@@ -2,12 +2,14 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence, useSpring, useTransform } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Folder as FolderIcon, X, Pencil, Check, X as XIcon } from 'lucide-react';
+import { FolderIcon as RenderFolderIcon } from '@/components/ui/folder-icon';
 import { CustomTooltip } from '@/components/ui/custom-tooltip';
 import { cn } from '@/lib/utils';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
-import { EmojiPicker } from '@/components/ui/emoji-picker';
-import { Trash2 } from 'lucide-react';
-import { useDockEffect } from '@/hooks/useDockEffect';
+import { IconPicker } from "@/components/ui/icon-picker";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+
+import { FolderContextMenu } from '@/components/ui/folder-context-menu';
 
 interface FolderTabProps {
   folder: {
@@ -43,6 +45,7 @@ export const FolderTab: React.FC<FolderTabProps> = ({
 
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const clickCountRef = useRef(0);
 
@@ -117,9 +120,8 @@ export const FolderTab: React.FC<FolderTabProps> = ({
     setShowEmojiPicker(false);
   }, [onEmojiChange, folder.id, setShowEmojiPicker]);
 
-  const handleEmojiClickInternal = useCallback((e: React.MouseEvent) => {
-    setShowEmojiPicker(prev => !prev);
-  }, [setShowEmojiPicker]);
+  // Clicking the emoji should NOT open the picker anymore, only from context menu.
+const handleEmojiClickInternal = () => {};
 
   // useEffect Hooks
   useEffect(() => {
@@ -170,6 +172,10 @@ export const FolderTab: React.FC<FolderTabProps> = ({
             handleRenameInternal();
           }
         } else if (showEmojiPicker) {
+          // If clicking inside the popover, ignore
+          if (popoverRef.current && popoverRef.current.contains(event.target as Node)) {
+            return;
+          }
           setShowEmojiPicker(false);
         }
       }
@@ -182,7 +188,14 @@ export const FolderTab: React.FC<FolderTabProps> = ({
 
   // The main JSX for the component
   return (
-    <div className="relative flex items-center" ref={containerRef}>
+    <FolderContextMenu
+      onRename={handleDoubleClickInternal}
+      onChangeIcon={() => {
+          setTimeout(() => setShowEmojiPicker(true), 0);
+        }}
+      onDelete={() => setShowDeleteDialog(true)}
+    >
+      <div className="relative flex items-center" ref={containerRef}>
       <motion.div
         layout
         className={cn(
@@ -198,15 +211,6 @@ export const FolderTab: React.FC<FolderTabProps> = ({
           y: 0,
           transition: 'transform 0.2s ease-out, background-color 0.2s ease',
         }}
-        whileHover={!isRenaming ? {
-          scale: 1.2,
-          y: -4,
-          transition: { 
-            type: 'spring',
-            stiffness: 400,
-            damping: 15
-          }
-        } : {}}
       >
       <CustomTooltip content={isRenaming ? '' : folder.name}>
         <Button
@@ -236,37 +240,27 @@ export const FolderTab: React.FC<FolderTabProps> = ({
           disabled={isDeleting}
         >
           <div className="relative w-8 h-8 flex items-center justify-center flex-shrink-0">
-            <button
-              type="button"
-              onClick={handleEmojiClickInternal}
-              className="text-sm hover:bg-slate-600/50 rounded-md p-0.5 transition-colors"
-              aria-label="Change folder emoji"
-            >
-              {folder.emoji || '📁'}
-            </button>
-            {isActive && !isRenaming && (
-              <CustomTooltip content="Delete folder">
-                <Button
-                  variant="ghost"
-                  className="absolute top-0 -right-1 h-2 w-2 p-0 flex items-center justify-center text-red-500 hover:text-red-400 z-10"
-                  onClick={(e) => { 
-                    e.stopPropagation(); // Prevent main button click
-                    handleDeleteClickInternal(e); 
-                  }}
-                  disabled={isDeleting}
-                  aria-label="Delete folder"
-                >
-                  <Trash2 size={4} />
-                </Button>
-              </CustomTooltip>
-            )}
-            {showEmojiPicker && (
-              <div className="fixed z-[100] -translate-x-1/2 left-1/2 bottom-full mb-2">
-                <div className="bg-slate-800 rounded-lg shadow-xl border border-slate-700 overflow-hidden">
-                  <EmojiPicker value={folder.emoji || '📁'} onChange={handleEmojiSelectInternal} />
-                </div>
-              </div>
-            )}
+  <button
+    type="button"
+    onClick={handleEmojiClickInternal}
+    className="text-sm hover:bg-slate-600/50 rounded-md p-0.5 transition-colors"
+    aria-label="Change folder emoji"
+  >
+    <RenderFolderIcon value={folder.emoji || '📁'} />
+  </button>
+  {showEmojiPicker && (
+    <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
+      <PopoverTrigger asChild>
+        {/* hidden trigger (the emoji button itself) */}
+        <span className="sr-only" />
+      </PopoverTrigger>
+       <PopoverContent ref={popoverRef} onInteractOutside={(e)=>e.preventDefault()} className="p-0 border-slate-700 bg-slate-800">
+        <IconPicker value={folder.emoji || '📁'} onChange={handleEmojiSelectInternal} />
+      </PopoverContent>
+    </Popover>
+  )}
+
+
           </div>
         </Button>
       </CustomTooltip>
@@ -321,5 +315,6 @@ export const FolderTab: React.FC<FolderTabProps> = ({
         />
       </motion.div>
     </div>
+    </FolderContextMenu>
   );
 };
