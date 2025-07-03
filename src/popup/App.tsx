@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { CustomTooltip } from '@/components/ui/custom-tooltip';
+import { GlowingButton } from '@/components/ui/glowing-button';
 import type { Snippet, Folder } from '../utils/types';
 import { SnippetFormModal } from './components/SnippetFormModal';
 import { SnippetItem } from './components/SnippetItem';
@@ -365,7 +366,6 @@ const App: React.FC = () => {
           onRenameFolder={handleFolderRename}
           onEmojiChange={handleEmojiChange}
           onAddNewFolder={handleCreateNewFolder}
-          onAddNewSnippet={handleOpenNewSnippetModal}
           isEditingOrCreatingFolder={!!editingFolderId}
           editingFolderId={editingFolderId}
           onCancelRename={handleCancelFolderEdit}
@@ -373,16 +373,21 @@ const App: React.FC = () => {
         <main className="flex-1 p-4 overflow-auto flex flex-col pt-2"> {/* Added pt-2 for spacing below tabs */}
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-semibold text-sky-400">{currentDisplayTitle}</h2>
+            <GlowingButton onClick={handleOpenNewSnippetModal}>
+              + Add Snippet
+            </GlowingButton>
           </div>
 
           <div className="mb-4">
-            <Input
-              type="search"
-              placeholder="Search snippets..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-800 border-slate-700 placeholder-slate-500 text-slate-100"
-            />
+            <CustomTooltip content="Search through your snippets" side="bottom">
+              <Input
+                type="search"
+                placeholder="Search snippets..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-slate-800 border-slate-700 placeholder-slate-500 text-slate-100"
+              />
+            </CustomTooltip>
           </div>
 
           {pinnedSnippets.length === 0 && otherSnippets.length === 0 && !isLoading && (

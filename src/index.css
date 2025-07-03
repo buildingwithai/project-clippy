@@ -33,3 +33,14 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #3b82f6; /* A lighter blue for hover */
 }
+
+/* --- Animated utilities --- */
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 4s linear infinite;
+}
