@@ -13,31 +13,35 @@ const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 let isInitializing = false;
 
 // Fallback mock data for testing when the pack registry is not available
-const MOCK_PACK_REGISTRY = {
-  packs: [
-    {
-      id: 'basic-dev-snippets',
-      name: 'Basic Development Snippets',
-      description: 'Common code snippets for developers',
-      snippetCount: 12,
-      url: '/packs/basic-dev-snippets.json'
-    },
-    {
-      id: 'ui-components',
-      name: 'UI Component Templates',
-      description: 'Ready-to-use UI component snippets',
-      snippetCount: 8,
-      url: '/packs/ui-components.json'
-    },
-    {
-      id: 'productivity-templates',
-      name: 'Productivity Templates',
-      description: 'Email templates, meeting notes, and more',
-      snippetCount: 15,
-      url: '/packs/productivity-templates.json'
-    }
-  ]
-};
+const MOCK_PACK_REGISTRY = [
+  {
+    id: 'ai-prompts',
+    name: 'AI Prompts',
+    description: 'Collection of useful AI prompts',
+    snippetCount: 10,
+    url: 'https://buildingwithai.github.io/project-clippy/packs/ai-prompts.json',
+    version: '1.0.0',
+    new: true
+  },
+  {
+    id: 'basic-dev-snippets',
+    name: 'Basic Development Snippets',
+    description: 'Common code snippets for developers',
+    snippetCount: 12,
+    url: 'https://buildingwithai.github.io/project-clippy/packs/basic-dev-snippets.json',
+    version: '1.0.0',
+    new: false
+  },
+  {
+    id: 'ui-components',
+    name: 'UI Component Templates',
+    description: 'Ready-to-use UI component snippets',
+    snippetCount: 8,
+    url: 'https://buildingwithai.github.io/project-clippy/packs/ui-components.json',
+    version: '1.0.0',
+    new: false
+  }
+];
 
 async function fetchPackRegistry() {
   try {
@@ -57,8 +61,11 @@ async function fetchPackRegistry() {
       throw new Error(`HTTP ${res.status}`);
     }
     const data = await res.json();
+    // Handle both array format and { packs: [...] } format for backward compatibility
+    const packRegistry = Array.isArray(data) ? { packs: data } : data;
+    
     await chrome.storage.local.set({ 
-      packRegistry: data, 
+      packRegistry,
       packRegistryFetchedAt: Date.now(),
       usingMockData: false 
     });
