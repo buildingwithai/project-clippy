@@ -195,8 +195,10 @@ const App: React.FC = () => {
       const newSnippets: Snippet[] = [];
       for (const sn of packJson.snippets) {
         if (!existingSnippets.some((s) => s.id === sn.id)) {
+          const text = (sn as any).text ?? (sn as any).content ?? '';
           newSnippets.push({
             ...sn,
+            text, // ensure internal field is populated
             createdAt: new Date().toISOString(),
             frequency: 0,
           });
