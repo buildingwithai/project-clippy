@@ -10,6 +10,9 @@ import { GlowingButton } from '@/components/ui/glowing-button';
 import type { Snippet, Folder } from '../utils/types';
 import { SnippetFormModal } from './components/SnippetFormModal';
 import { SnippetItem } from './components/SnippetItem';
+import type { TopTab } from './components/TopTabs';
+import { BankToggle } from './components/BankToggle';
+import { BankView, RemotePackMeta } from './components/BankView';
 
 const App: React.FC = () => {
   // State for snippets and folders
@@ -18,20 +21,39 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState(''); // For snippet search
+  // Tabs: 'all' or 'bank'
+  const [activeTab, setActiveTab] = useState<TopTab>('all');
   const [activeFilterFolderId, setActiveFilterFolderId] = useState<string | null>(null);
-
-  // Folder editing state
-  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
-  const [editingFolderName, setEditingFolderName] = useState('');
-  const [contextMenuFolder, setContextMenuFolder] = useState<Folder | null>(null); // Corrected type
+  
 
   // Snippet modal state
   const [isSnippetModalOpen, setIsSnippetModalOpen] = useState(false);
   const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
   const [copiedSnippetId, setCopiedSnippetId] = useState<string | null>(null);
 
+  // Top-level tab state (Pinned / Bank / All)
+  
+
+  // Folder editing state
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [editingFolderName, setEditingFolderName] = useState('');
+  const [contextMenuFolder, setContextMenuFolder] = useState<Folder | null>(null);
+
   // UI state
   const [isFoldersCollapsed, setIsFoldersCollapsed] = useState(false);
+  // Remote snippet packs (placeholder fetch to be replaced with real fetch)
+  const [packs, setPacks] = useState<RemotePackMeta[]>([
+    { id: 'ai-pack', name: 'AI Prompt Pack', description: 'Ready-to-use AI prompts', snippetCount: 8 },
+    { id: 'job-pack', name: 'Job Hunt Booster', description: 'Snippets for job applications', snippetCount: 5 },
+  ]);
+  const [importedPackIds, setImportedPackIds] = useState<Set<string>>(new Set());
+
+  const handleImportPack = async (packId: string) => {
+    // TODO: fetch pack JSON and clone snippets; placeholder only hides card
+    setImportedPackIds(new Set([...importedPackIds, packId]));
+    // Persist imported state so pack does not reappear (future work)
+  };
+
   // Text coming from context menu selection to pre-populate new snippet
   const [initialSnippetText, setInitialSnippetText] = useState<string | null>(null);
   const [folderError, setFolderError] = useState<string | null>(null); // For folder-specific errors
@@ -234,12 +256,7 @@ const App: React.FC = () => {
     return { pinnedSnippets: pinned, otherSnippets: others };
   }, [snippets, searchTerm, activeFilterFolderId]);
 
-  // Get current display title for the snippet list
-  const currentDisplayTitle = React.useMemo(() => {
-    if (activeFilterFolderId === null) return 'All Snippets';
-    const folder = getFolderById(activeFilterFolderId);
-    return folder ? folder.name : 'Snippets';
-  }, [activeFilterFolderId, folders]);
+  
   
   // Handle copying snippet text to clipboard
   const handleCopyToClipboard = async (text: string, snippetId: string) => {
@@ -379,15 +396,18 @@ const App: React.FC = () => {
           editingFolderId={editingFolderId}
           onCancelRename={handleCancelFolderEdit}
         />
-        <main className="flex-1 p-4 overflow-auto flex flex-col pt-2"> {/* Added pt-2 for spacing below tabs */}
+        <main className="flex-1 p-4 overflow-auto flex flex-col pt-2">
+        
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold text-sky-400">{currentDisplayTitle}</h2>
+            <BankToggle activeTab={activeTab} setActiveTab={setActiveTab} />
+            
             <GlowingButton onClick={handleOpenNewSnippetModal}>
               + Add Snippet
             </GlowingButton>
           </div>
 
-          <div className="mb-4">
+          {activeTab !== 'bank' && (
+            <div className="mb-4">
             <CustomTooltip content="Search through your snippets" side="bottom">
               <Input
                 type="search"
@@ -397,7 +417,8 @@ const App: React.FC = () => {
                 className="w-full bg-slate-800 border-slate-700 placeholder-slate-500 text-slate-100"
               />
             </CustomTooltip>
-          </div>
+           </div>
+          )}
 
           {pinnedSnippets.length === 0 && otherSnippets.length === 0 && !isLoading && (
             <div className="text-center text-slate-400 py-8 flex-grow flex flex-col items-center justify-center">
@@ -419,7 +440,7 @@ const App: React.FC = () => {
           <ScrollArea className="flex-grow">
             <div className="space-y-4">
               {/* Pinned Section */}
-              {pinnedSnippets.length > 0 && (
+              {activeTab !== 'bank' && pinnedSnippets.length > 0 && (
                 <section>
                   <h3 className="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-2">Pinned</h3>
                   <div className="space-y-3">
@@ -439,7 +460,12 @@ const App: React.FC = () => {
                 </section>
               )}
 
-              {/* Other Snippets Section */}
+              {/* Bank view */}
+          {activeTab === 'bank' && (
+            <BankView packs={packs} onImportPack={handleImportPack} importedPackIds={importedPackIds} />
+          )}
+
+          {/* Other Snippets Section */}
               {otherSnippets.length > 0 && (
                 <section>
                   {pinnedSnippets.length > 0 && <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2 pt-2">All Snippets</h3>}
