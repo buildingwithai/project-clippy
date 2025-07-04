@@ -262,16 +262,26 @@ function populatePasteSubmenuItems() {
 
 chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
   if (request.action === 'getPackRegistry') {
-    const { packRegistry, packRegistryFetchedAt } = await chrome.storage.local.get([
-      'packRegistry',
-      'packRegistryFetchedAt',
-    ]) as { packRegistry?: unknown; packRegistryFetchedAt?: number };
-    // If older than 6h or missing, refresh asynchronously (response returns cached / undefined immediately)
-    if (!packRegistry || !packRegistryFetchedAt || Date.now() - packRegistryFetchedAt > SIX_HOURS_MS) {
-      fetchPackRegistry();
-    }
-    sendResponse({ packRegistry });
-    return true; // keep port open for async
+    // Immediately respond with current data if available
+    chrome.storage.local.get(['packRegistry', 'packRegistryFetchedAt'], (result) => {
+      const { packRegistry, packRegistryFetchedAt } = result as { 
+        packRegistry?: unknown; 
+        packRegistryFetchedAt?: number 
+      };
+      
+      // If data is stale or missing, refresh in background
+      if (!packRegistry || !packRegistryFetchedAt || Date.now() - packRegistryFetchedAt > SIX_HOURS_MS) {
+        fetchPackRegistry().catch(console.error);
+      }
+      
+      // Send current data (might be undefined if first load)
+      sendResponse({ 
+        packRegistry: packRegistry || { packs: [] },
+        success: true 
+      });
+    });
+    
+    return true; // Keep the message channel open for async response
   }
   if (request.type === 'PASTE_SNIPPET' && sender.origin === chrome.runtime.getURL('').slice(0, -1)) {
     handlePasteRequest(request.snippet);

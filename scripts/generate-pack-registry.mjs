@@ -31,6 +31,7 @@ async function main() {
       name: data.name ?? '',
       version: data.version ?? '1.0.0',
       snippetCount: Array.isArray(data.snippets) ? data.snippets.length : 0,
+      url: `/packs/${file}`
     });
   }
 

@@ -101,17 +101,41 @@ const App: React.FC = () => {
 
   // Load registry & imported ids on mount
   useEffect(() => {
-    chrome.runtime.sendMessage({ action: 'getPackRegistry' }, (resp) => {
-      if (resp?.packRegistry?.packs) {
-        setPacks(resp.packRegistry.packs as RemotePackMeta[]);
+    const loadPacks = async () => {
+      try {
+        // First try to load from cache
+        const cacheResult = await chrome.storage.local.get(['packRegistry', 'importedPackIds']);
+        
+        if (cacheResult.packRegistry?.packs) {
+          setPacks(cacheResult.packRegistry.packs);
+          console.log('Loaded packs from cache:', cacheResult.packRegistry.packs);
+        }
+        
+        if (cacheResult.importedPackIds) {
+          setImportedPackIds(new Set(cacheResult.importedPackIds));
+        }
+        
+        // Then refresh from network
+        const resp = await new Promise<any>(resolve => {
+          chrome.runtime.sendMessage({ action: 'getPackRegistry' }, resolve);
+        });
+        
+        if (resp?.packRegistry?.packs) {
+          console.log('Received updated packs from background:', resp.packRegistry.packs);
+          setPacks(resp.packRegistry.packs);
+        } else if (resp?.packRegistry) {
+          console.log('Received packs in root of packRegistry:', resp.packRegistry);
+          // Handle case where packs are directly in packRegistry
+          setPacks(Array.isArray(resp.packRegistry) ? resp.packRegistry : []);
+        } else {
+          console.warn('No packs found in response:', resp);
+        }
+      } catch (error) {
+        console.error('Error loading packs:', error);
       }
-    });
-
-    chrome.storage.local.get('importedPackIds', (res) => {
-      if (res.importedPackIds && Array.isArray(res.importedPackIds)) {
-        setImportedPackIds(new Set(res.importedPackIds as string[]));
-      }
-    });
+    };
+    
+    loadPacks();
   }, []);
 
   const handleImportPack = async (packId: string) => {
