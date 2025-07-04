@@ -161,7 +161,7 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
       </div>
       {/* Settings button - only system action remains in corner */}
       <div className="absolute right-2 top-1/2 -translate-y-1/2 z-10">
-        <CustomTooltip content={showSettingsTooltip ? "Manage hotkeys and settings here!" : "Settings"} side="bottom">
+        <CustomTooltip content={showSettingsTooltip ? "Manage hotkeys and settings here!" : "Settings"} side="left">
           <button onClick={handleSettingsInteraction} className="p-1.5 text-slate-400 hover:text-white transition-colors rounded-md hover:bg-slate-700/50">
             <Settings size={16} />
           </button>
