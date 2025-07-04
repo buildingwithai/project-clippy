@@ -35,8 +35,17 @@ async function main() {
   }
 
   const outPath = path.join(docsPacksDir, 'index.json');
+  // Write as direct array, not wrapped in { packs: [...] }
   await fs.writeFile(outPath, JSON.stringify(registry, null, 2));
   console.log(`Generated pack registry with ${registry.length} entries → ${path.relative(projectRoot, outPath)}`);
+  
+  // Also write the full pack files to docs/packs/
+  for (const file of files) {
+    const srcPath = path.join(packsDir, file);
+    const destPath = path.join(docsPacksDir, file);
+    await fs.copyFile(srcPath, destPath);
+    console.log(`Copied pack file → ${path.relative(projectRoot, destPath)}`);
+  }
 }
 
 main().catch((err) => {
