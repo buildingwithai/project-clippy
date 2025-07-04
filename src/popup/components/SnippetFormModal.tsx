@@ -20,6 +20,7 @@ interface SnippetFormModalProps {
     folderId: string | null;
   }) => void;
   snippetToEdit?: Snippet | null;
+  initialText?: string; // New: text to pre-populate when creating a new snippet
   folders: Folder[];
 }
 
@@ -28,6 +29,7 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
   onClose,
   onSave,
   snippetToEdit,
+  initialText,
   folders,
 }) => {
   const [title, setTitle] = useState('');
@@ -39,13 +41,18 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
       setTitle(snippetToEdit.title || ''); // Fallback for optional title
       setText(snippetToEdit.text);
       setSelectedFolderId(snippetToEdit.folderId || null); // folderId is optional in Snippet, maps to null for modal state
+    } else if (initialText) {
+      // Creating new snippet with pre-populated text (e.g., from context menu)
+      setTitle('');
+      setText(initialText);
+      setSelectedFolderId(null);
     } else {
-      // Reset form for new snippet
+      // Reset form for new snippet without initial text
       setTitle('');
       setText('');
       setSelectedFolderId(null);
     }
-  }, [snippetToEdit, isOpen]); // Re-run effect if isOpen changes to reset form when re-opened for new snippet
+  }, [snippetToEdit, initialText, isOpen]); // Re-run effect if isOpen changes to reset form when re-opened for new snippet
 
   const handleSubmit = () => {
     if (!title.trim() || !text.trim()) {

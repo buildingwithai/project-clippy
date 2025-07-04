@@ -32,6 +32,8 @@ const App: React.FC = () => {
 
   // UI state
   const [isFoldersCollapsed, setIsFoldersCollapsed] = useState(false);
+  // Text coming from context menu selection to pre-populate new snippet
+  const [initialSnippetText, setInitialSnippetText] = useState<string | null>(null);
   const [folderError, setFolderError] = useState<string | null>(null); // For folder-specific errors
 
   // Refs
@@ -51,8 +53,7 @@ const App: React.FC = () => {
 
       if (result.pendingSnippetText) {
         console.log('Pending snippet text found, opening new snippet modal:', result.pendingSnippetText);
-        // TODO: Pass pendingSnippetText to the modal if it supports initial values
-        handleOpenNewSnippetModal(); 
+        handleOpenNewSnippetModalWithText(result.pendingSnippetText); 
         await chrome.storage.local.remove('pendingSnippetText');
       }
       setError(null);
@@ -262,6 +263,13 @@ const App: React.FC = () => {
     }
   };
 
+  // Helper to open new snippet modal with pre-filled text (used from context menu)
+  const handleOpenNewSnippetModalWithText = (text: string) => {
+    setInitialSnippetText(text);
+    setEditingSnippet(null);
+    setIsSnippetModalOpen(true);
+  };
+
   // Handler to open the snippet modal for a new snippet
   const handleOpenNewSnippetModal = () => {
     setEditingSnippet(null);
@@ -278,6 +286,7 @@ const App: React.FC = () => {
   const handleCloseSnippetModal = () => {
     setIsSnippetModalOpen(false);
     setEditingSnippet(null);
+    setInitialSnippetText(null);
   };
 
   // Handle saving snippet from modal (create or update)
@@ -462,6 +471,7 @@ const App: React.FC = () => {
           onSave={handleSaveFromModal}
           folders={folders}
           snippetToEdit={editingSnippet}
+          initialText={!editingSnippet ? initialSnippetText ?? undefined : undefined}
         />
       )}
     </>
