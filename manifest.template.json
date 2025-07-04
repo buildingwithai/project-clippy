@@ -9,6 +9,12 @@
     "activeTab",
     "scripting"
   ],
+  "host_permissions": [
+    "https://buildingwithai.github.io/project-clippy/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src https://buildingwithai.github.io"
+  },
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

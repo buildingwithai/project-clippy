@@ -1,0 +1,19 @@
+{
+  "id": "ai-prompts",
+  "name": "AI Prompt Pack",
+  "version": "1.0.0",
+  "snippets": [
+    {
+      "id": "summarize-article",
+      "title": "Summarize Article",
+      "content": "Summarize the following article in 3 bullet points:\n\n${clipboard}",
+      "tags": ["summary", "writing"]
+    },
+    {
+      "id": "email-reply",
+      "title": "Smart Email Reply",
+      "content": "Write a polite reply to the following email:\n\n${clipboard}\n\nTone: professional",
+      "tags": ["email", "communication"]
+    }
+  ]
+}
