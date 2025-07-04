@@ -41,17 +41,156 @@ const App: React.FC = () => {
 
   // UI state
   const [isFoldersCollapsed, setIsFoldersCollapsed] = useState(false);
-  // Remote snippet packs (placeholder fetch to be replaced with real fetch)
-  const [packs, setPacks] = useState<RemotePackMeta[]>([
-    { id: 'ai-pack', name: 'AI Prompt Pack', description: 'Ready-to-use AI prompts', snippetCount: 8 },
-    { id: 'job-pack', name: 'Job Hunt Booster', description: 'Snippets for job applications', snippetCount: 5 },
-  ]);
+  // Remote snippet packs
+  const [packs, setPacks] = useState<RemotePackMeta[]>([]);
   const [importedPackIds, setImportedPackIds] = useState<Set<string>>(new Set());
 
+  const PACKS_ORIGIN = 'https://buildingwithai.github.io/project-clippy';
+
+  // Generate mock snippets for testing when real pack data is not available
+  const generateMockSnippets = (packId: string, packName: string, count: number): Snippet[] => {
+    const mockData: Record<string, Array<{title: string, text: string}>> = {
+      'basic-dev-snippets': [
+        { title: 'Console Log', text: 'console.log();' },
+        { title: 'Function Declaration', text: 'function functionName() {\n  // code here\n}' },
+        { title: 'Arrow Function', text: 'const functionName = () => {\n  // code here\n};' },
+        { title: 'Try Catch', text: 'try {\n  // code here\n} catch (error) {\n  console.error(error);\n}' },
+        { title: 'For Loop', text: 'for (let i = 0; i < array.length; i++) {\n  // code here\n}' },
+        { title: 'If Statement', text: 'if (condition) {\n  // code here\n}' },
+        { title: 'Async Function', text: 'async function functionName() {\n  // code here\n}' },
+        { title: 'Promise', text: 'const promise = new Promise((resolve, reject) => {\n  // code here\n});' },
+        { title: 'Import Statement', text: "import { item } from 'module';" },
+        { title: 'Export Default', text: 'export default componentName;' },
+        { title: 'Class Declaration', text: 'class ClassName {\n  constructor() {\n    // code here\n  }\n}' },
+        { title: 'Destructuring', text: 'const { property } = object;' }
+      ],
+      'ui-components': [
+        { title: 'React Component', text: 'const ComponentName = () => {\n  return (\n    <div>\n      {/* content */}\n    </div>\n  );\n};' },
+        { title: 'Button Component', text: '<button className="btn-primary" onClick={handleClick}>\n  Click me\n</button>' },
+        { title: 'Input Field', text: '<input\n  type="text"\n  placeholder="Enter text"\n  value={value}\n  onChange={handleChange}\n/>' },
+        { title: 'Card Layout', text: '<div className="card">\n  <div className="card-header">\n    <h3>Title</h3>\n  </div>\n  <div className="card-body">\n    Content\n  </div>\n</div>' },
+        { title: 'Modal Dialog', text: '<div className="modal">\n  <div className="modal-content">\n    <h2>Modal Title</h2>\n    <p>Modal content goes here</p>\n  </div>\n</div>' },
+        { title: 'Navigation Bar', text: '<nav className="navbar">\n  <div className="nav-brand">Brand</div>\n  <ul className="nav-links">\n    <li><a href="#">Home</a></li>\n    <li><a href="#">About</a></li>\n  </ul>\n</nav>' },
+        { title: 'Grid Layout', text: '<div className="grid">\n  <div className="grid-item">Item 1</div>\n  <div className="grid-item">Item 2</div>\n  <div className="grid-item">Item 3</div>\n</div>' },
+        { title: 'Loading Spinner', text: '<div className="spinner">\n  <div className="spinner-circle"></div>\n</div>' }
+      ],
+      'productivity-templates': [
+        { title: 'Meeting Notes', text: '# Meeting Notes - [Date]\n\n## Attendees\n- \n\n## Agenda\n1. \n\n## Action Items\n- [ ] \n\n## Next Steps\n' },
+        { title: 'Email Template', text: 'Subject: \n\nHi [Name],\n\nI hope this email finds you well.\n\n[Content]\n\nBest regards,\n[Your Name]' },
+        { title: 'Daily Standup', text: '## Daily Standup - [Date]\n\n### Yesterday\n- \n\n### Today\n- \n\n### Blockers\n- None' },
+        { title: 'Project Status', text: '## Project Status Update\n\n**Project:** \n**Date:** \n**Status:** On Track / At Risk / Delayed\n\n### Completed\n- \n\n### In Progress\n- \n\n### Next Week\n- \n\n### Risks/Issues\n- ' },
+        { title: 'Bug Report', text: '## Bug Report\n\n**Summary:** \n**Steps to Reproduce:**\n1. \n2. \n3. \n\n**Expected Result:** \n**Actual Result:** \n**Browser/OS:** \n**Priority:** High/Medium/Low' },
+        { title: 'Code Review', text: '## Code Review Checklist\n\n- [ ] Code follows style guidelines\n- [ ] Functions are well-documented\n- [ ] Tests are included\n- [ ] No console.log statements\n- [ ] Error handling is adequate\n- [ ] Performance considerations addressed' },
+        { title: 'Sprint Planning', text: '## Sprint Planning - Sprint [Number]\n\n**Sprint Goal:** \n**Duration:** [Start Date] - [End Date]\n\n### Stories for Sprint\n- [ ] \n\n### Team Capacity\n- \n\n### Definition of Done\n- [ ] Code reviewed\n- [ ] Tests pass\n- [ ] Documentation updated' },
+        { title: 'Retrospective', text: '## Sprint Retrospective\n\n### What went well?\n- \n\n### What could be improved?\n- \n\n### Action items for next sprint\n- [ ] \n\n### Team sentiment: 😊 😐 😞' }
+      ]
+    };
+
+    const templates = mockData[packId] || [];
+    const selectedTemplates = templates.slice(0, count);
+    
+    return selectedTemplates.map((template, index) => ({
+      id: `${packId}-snippet-${index + 1}`,
+      title: template.title,
+      text: template.text,
+      createdAt: new Date().toISOString(),
+      frequency: 0,
+      folderId: undefined
+    }));
+  };
+
+  // Load registry & imported ids on mount
+  useEffect(() => {
+    chrome.runtime.sendMessage({ action: 'getPackRegistry' }, (resp) => {
+      if (resp?.packRegistry?.packs) {
+        setPacks(resp.packRegistry.packs as RemotePackMeta[]);
+      }
+    });
+
+    chrome.storage.local.get('importedPackIds', (res) => {
+      if (res.importedPackIds && Array.isArray(res.importedPackIds)) {
+        setImportedPackIds(new Set(res.importedPackIds as string[]));
+      }
+    });
+  }, []);
+
   const handleImportPack = async (packId: string) => {
-    // TODO: fetch pack JSON and clone snippets; placeholder only hides card
-    setImportedPackIds(new Set([...importedPackIds, packId]));
-    // Persist imported state so pack does not reappear (future work)
+    const packMeta = packs.find((p) => p.id === packId);
+    if (!packMeta) return;
+    try {
+      if (!packMeta.url) {
+        alert('Pack missing URL.');
+        return;
+      }
+
+      // Check if we're using mock data
+      const storageResult = await chrome.storage.local.get('usingMockData');
+      const usingMockData = storageResult.usingMockData || false;
+
+      if (usingMockData) {
+        // Generate mock snippets for testing
+        const mockSnippets = generateMockSnippets(packId, packMeta.name, packMeta.snippetCount || 5);
+        
+        // Deduplicate against existing snippets (by id)
+        const existingResult = await chrome.storage.local.get('snippets');
+        const existingSnippets: Snippet[] = existingResult.snippets || [];
+        const newSnippets: Snippet[] = [];
+        for (const sn of mockSnippets) {
+          if (!existingSnippets.some((s) => s.id === sn.id)) {
+            newSnippets.push({
+              ...sn,
+              createdAt: new Date().toISOString(),
+              frequency: 0,
+            });
+          }
+        }
+        if (newSnippets.length) {
+          const combined = [...existingSnippets, ...newSnippets];
+          await chrome.storage.local.set({ snippets: combined });
+          setSnippets(combined);
+        }
+        
+        // Mark as imported
+        const nextSet = new Set([...importedPackIds, packId]);
+        setImportedPackIds(nextSet);
+        chrome.storage.local.set({ importedPackIds: Array.from(nextSet) });
+        console.log(`[Clippy] Mock pack "${packMeta.name}" imported with ${newSnippets.length} new snippets`);
+        return;
+      }
+
+      // Original implementation for real pack registry
+      const url = packMeta.url.startsWith('http') ? packMeta.url : `${PACKS_ORIGIN}${packMeta.url}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const packJson = await res.json();
+      if (!Array.isArray(packJson.snippets)) throw new Error('Invalid pack format');
+
+      // Deduplicate against existing snippets (by id)
+      const existingResult = await chrome.storage.local.get('snippets');
+      const existingSnippets: Snippet[] = existingResult.snippets || [];
+      const newSnippets: Snippet[] = [];
+      for (const sn of packJson.snippets) {
+        if (!existingSnippets.some((s) => s.id === sn.id)) {
+          newSnippets.push({
+            ...sn,
+            createdAt: new Date().toISOString(),
+            frequency: 0,
+          });
+        }
+      }
+      if (newSnippets.length) {
+        const combined = [...existingSnippets, ...newSnippets];
+        await chrome.storage.local.set({ snippets: combined });
+        setSnippets(combined);
+      }
+      // Mark as imported
+      const nextSet = new Set([...importedPackIds, packId]);
+      setImportedPackIds(nextSet);
+      chrome.storage.local.set({ importedPackIds: Array.from(nextSet) });
+    } catch (err) {
+      console.error('Failed to import pack', err);
+      alert('Failed to import pack. Check console for details.');
+    }
   };
 
   // Text coming from context menu selection to pre-populate new snippet

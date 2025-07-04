@@ -8,6 +8,7 @@ export interface RemotePackMeta {
   name: string;
   description?: string;
   snippetCount?: number;
+  url?: string;
 }
 
 interface BankViewProps {

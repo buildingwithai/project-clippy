@@ -2,15 +2,97 @@
  * Background service worker for Project Clippy.
  * Handles context menu creation and other background tasks.
  */
-import type { Snippet } from '@/utils/types';
-import DOMPurify from 'dompurify';
 import { runMigrations } from './migration';
 
+import type { Snippet } from '@/utils/types';
+
+const PACK_REGISTRY_URL = 'https://buildingwithai.github.io/project-clippy/packs/index.json';
+const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+
+// Flag to prevent race condition during initialization
+let isInitializing = false;
+
+// Fallback mock data for testing when the pack registry is not available
+const MOCK_PACK_REGISTRY = {
+  packs: [
+    {
+      id: 'basic-dev-snippets',
+      name: 'Basic Development Snippets',
+      description: 'Common code snippets for developers',
+      snippetCount: 12,
+      url: '/packs/basic-dev-snippets.json'
+    },
+    {
+      id: 'ui-components',
+      name: 'UI Component Templates',
+      description: 'Ready-to-use UI component snippets',
+      snippetCount: 8,
+      url: '/packs/ui-components.json'
+    },
+    {
+      id: 'productivity-templates',
+      name: 'Productivity Templates',
+      description: 'Email templates, meeting notes, and more',
+      snippetCount: 15,
+      url: '/packs/productivity-templates.json'
+    }
+  ]
+};
+
+async function fetchPackRegistry() {
+  try {
+    const res = await fetch(PACK_REGISTRY_URL, { cache: 'no-store' });
+    if (!res.ok) {
+      if (res.status === 404) {
+        console.warn('[Clippy] Pack registry not found (404). Using fallback mock data for testing.');
+        // Use mock data as fallback
+        await chrome.storage.local.set({ 
+          packRegistry: MOCK_PACK_REGISTRY, 
+          packRegistryFetchedAt: Date.now(),
+          usingMockData: true 
+        });
+        console.log('[Clippy] Mock pack registry loaded');
+        return;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    await chrome.storage.local.set({ 
+      packRegistry: data, 
+      packRegistryFetchedAt: Date.now(),
+      usingMockData: false 
+    });
+    console.log('[Clippy] Pack registry updated');
+  } catch (err) {
+    console.error('[Clippy] Failed to fetch pack registry', err);
+    // Fallback to mock data on any error
+    console.warn('[Clippy] Using fallback mock data due to fetch error.');
+    await chrome.storage.local.set({ 
+      packRegistry: MOCK_PACK_REGISTRY, 
+      packRegistryFetchedAt: Date.now(),
+      usingMockData: true 
+    });
+    console.log('[Clippy] Mock pack registry loaded as fallback');
+  }
+}
+
+if (chrome.alarms?.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === "refreshPackRegistry") fetchPackRegistry();
+  });
+} else {
+  console.warn("[Clippy] chrome.alarms API not available – skipping periodic registry refresh");
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
+  isInitializing = true;
   console.log('Project Clippy extension installed.');
   await runMigrations();
   initializeContextMenus();
-  updatePasteContextMenu(); // Initial setup
+  // Fetch packs immediately and set recurring alarm
+  await fetchPackRegistry();
+  chrome.alarms?.create?.("refreshPackRegistry", { periodInMinutes: 360 });
+  isInitializing = false;
 });
 
 function initializeContextMenus() {
@@ -24,6 +106,11 @@ function initializeContextMenus() {
     id: 'pasteSnippetParent',
     title: 'Paste from Clippy',
     contexts: ['editable'],
+  }, () => {
+    // Initial setup of paste menu items
+    if (!chrome.runtime.lastError) {
+      populatePasteSubmenuItems();
+    }
   });
 }
 
@@ -84,7 +171,12 @@ function pasteTextInActiveElement(textToPaste: string) {
         selection.removeAllRanges();
         selection.addRange(range);
       } else {
-        document.execCommand('insertText', false, textToPaste);
+        // Fallback for older browsers
+        const textNode = document.createTextNode(textToPaste);
+        const range = document.createRange();
+        range.selectNodeContents(activeElement);
+        range.collapse(false);
+        range.insertNode(textNode);
       }
     }
   }
@@ -162,6 +254,18 @@ function populatePasteSubmenuItems() {
 }
 
 chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
+  if (request.action === 'getPackRegistry') {
+    const { packRegistry, packRegistryFetchedAt } = await chrome.storage.local.get([
+      'packRegistry',
+      'packRegistryFetchedAt',
+    ]) as { packRegistry?: unknown; packRegistryFetchedAt?: number };
+    // If older than 6h or missing, refresh asynchronously (response returns cached / undefined immediately)
+    if (!packRegistry || !packRegistryFetchedAt || Date.now() - packRegistryFetchedAt > SIX_HOURS_MS) {
+      fetchPackRegistry();
+    }
+    sendResponse({ packRegistry });
+    return true; // keep port open for async
+  }
   if (request.type === 'PASTE_SNIPPET' && sender.origin === chrome.runtime.getURL('').slice(0, -1)) {
     handlePasteRequest(request.snippet);
   } else if (request.type === 'PASTE_SNIPPET_BY_ID') {
@@ -188,7 +292,7 @@ async function handlePasteRequest(snippet: Snippet) {
     func: () => document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement || (document.activeElement as HTMLElement).isContentEditable,
   });
 
-  if (injectionResults.some((r: any) => r.result)) {
+  if (injectionResults.some((r: chrome.scripting.InjectionResult) => r.result)) {
     chrome.scripting.executeScript({
       target: { tabId: tab.id, allFrames: true },
       func: pasteTextInActiveElement,
@@ -225,7 +329,7 @@ async function copyToClipboardAndNotify(text: string, message: string) {
 }
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace === 'local' && changes.snippets) {
+  if (namespace === 'local' && changes.snippets && !isInitializing) {
     updatePasteContextMenu();
     chrome.runtime.sendMessage({ action: 'snippetSaved' }).catch((e: unknown) => console.log("Popup not open or error sending message:", e));
   }
@@ -261,7 +365,7 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
     const result = await chrome.storage.local.get(['hotkeyMappings', 'snippets']);
     const hotkeyMappings = result.hotkeyMappings || [];
     const snippets: Snippet[] = result.snippets || [];
-    const mapping = hotkeyMappings.find((m: any) => m.slot === slot);
+    const mapping = hotkeyMappings.find((m: { slot: string; snippetId: string }) => m.slot === slot);
     if (!mapping || !mapping.snippetId) {
       console.warn(`[Clippy] No snippet mapped for slot ${slot}`);
       chrome.notifications.create({
