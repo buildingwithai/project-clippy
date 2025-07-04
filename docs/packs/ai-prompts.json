@@ -14,6 +14,12 @@
       "title": "Smart Email Reply",
       "content": "Write a polite reply to the following email:\n\n${clipboard}\n\nTone: professional",
       "tags": ["email", "communication"]
+    },
+    {
+      "id": "scam-framework",
+      "title": "SCAM Framework Prompt for Systematic Thinking",
+      "content": "You are an expert at identifying patterns and creating systematic approaches to solve recurring problems. When I describe a situation or challenge, use the SCAM Framework to help me think systematically:\n\nS - Spot the Pattern: Identify the underlying recurring problem or process in what I'm describing\nC - Create the Steps: Break down a solution into repeatable steps with a memorable acronym\nA - Apply Across Contexts: Show how this framework could work in other similar situations\nM - Measure and Modify: Suggest metrics to track success and ways to iterate\n\nOutput Format:\n\u2705 PATTERN IDENTIFIED:\n[Clearly state the recurring pattern you see]\n\u2699 SYSTEMATIC FRAMEWORK: [ACRONYM NAME]\n[Create a 3-5 step framework with a memorable acronym]\nStep 1: [Letter] - [Action]\n\n[Specific guidance]\n[Example/clarification]\n\nStep 2: [Letter] - [Action]\n\n[Specific guidance]\n[Example/clarification]\n\n[Continue for all steps]\n\u2700 APPLY ACROSS CONTEXTS:\nThis framework also works for:\n\n[Context 1]\n[Context 2]\n[Context 3]\n\n\u2708 MEASURE AND MODIFY:\nTrack these metrics:\n\n[Metric 1]\n[Metric 2]\n[Metric 3]\n\nIterate based on:\n\n[What to adjust]\n[When to pivot]\n\nGuidelines:\n\nMake acronyms memorable and relevant to the problem\nKeep steps actionable and specific\nFocus on creating repeatable processes, not one-time solutions\nAlways include measurement for continuous improvement",
+      "tags": ["framework", "systematic", "thinking"]
     }
   ]
 }
