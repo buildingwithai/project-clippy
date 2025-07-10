@@ -2,9 +2,9 @@
  * Background service worker for Project Clippy.
  * Handles context menu creation and other background tasks.
  */
-import { runMigrations } from './migration';
-
 import type { Snippet } from '@/utils/types';
+
+import { runMigrations } from './migration';
 
 const PACK_REGISTRY_URL = 'https://buildingwithai.github.io/project-clippy/packs/index.json';
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
@@ -126,7 +126,257 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'saveSnippet') {
     if (info.selectionText && tab?.id) {
       console.log('Selected text to save via context menu:', info.selectionText);
-      await chrome.storage.local.set({ pendingSnippetText: info.selectionText });
+      
+      // Get HTML content from the selection
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            const selection = window.getSelection();
+            if (!selection || selection.rangeCount === 0) return { html: '', plainText: '' };
+            
+            // Enhanced HTML capture with comprehensive formatting preservation
+            function captureStyledHTML() {
+              if (!selection || selection.rangeCount === 0) return '';
+              
+              const range = selection.getRangeAt(0);
+              
+              // Method 1: Try to use the browser's built-in HTML serialization
+              function tryNativeHTMLCapture(): string {
+                try {
+                  // Create a temporary div to hold the cloned content
+                  const tempDiv = document.createElement('div');
+                  tempDiv.appendChild(range.cloneContents());
+                  
+                  // Walk through and enhance formatting
+                  const walker = document.createTreeWalker(
+                    tempDiv,
+                    NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT
+                  );
+                  
+                  let node = walker.nextNode();
+                  while (node) {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                      const element = node as Element;
+                      
+                      // Try to find the corresponding original element
+                      const xpath = getElementPath(element, tempDiv);
+                      const originalElement = findOriginalElement(xpath, range.commonAncestorContainer);
+                      
+                      if (originalElement) {
+                        const computedStyle = window.getComputedStyle(originalElement);
+                        applyFormattingToElement(element, computedStyle);
+                      }
+                    }
+                    node = walker.nextNode();
+                  }
+                  
+                  return tempDiv.innerHTML;
+                } catch (error) {
+                  console.warn('Native HTML capture failed:', error);
+                  return '';
+                }
+              }
+              
+              // Method 2: More aggressive style preservation
+              function tryAggressiveCapture(): string {
+                try {
+                  const fragment = range.cloneContents();
+                  const tempDiv = document.createElement('div');
+                  tempDiv.appendChild(fragment);
+                  
+                  // Process all text nodes and their parent elements
+                  const textNodes: Text[] = [];
+                  const walker = document.createTreeWalker(
+                    tempDiv,
+                    NodeFilter.SHOW_TEXT,
+                    null
+                  );
+                  
+                  let textNode = walker.nextNode() as Text;
+                  while (textNode) {
+                    textNodes.push(textNode);
+                    textNode = walker.nextNode() as Text;
+                  }
+                  
+                  // For each text node, wrap it with appropriate formatting
+                  textNodes.forEach(textNode => {
+                    const text = textNode.textContent || '';
+                    if (text.trim()) {
+                      // Find the original text node in the document
+                      const originalTextNode = findOriginalTextNode(text, range);
+                      if (originalTextNode && originalTextNode.parentElement) {
+                        const parentElement = originalTextNode.parentElement;
+                        const computedStyle = window.getComputedStyle(parentElement);
+                        
+                        // Create a span with proper formatting
+                        const span = document.createElement('span');
+                        applyFormattingToElement(span, computedStyle);
+                        span.textContent = text;
+                        
+                        textNode.parentNode?.replaceChild(span, textNode);
+                      }
+                    }
+                  });
+                  
+                  return tempDiv.innerHTML;
+                } catch (error) {
+                  console.warn('Aggressive capture failed:', error);
+                  return '';
+                }
+              }
+              
+              // Helper function to apply formatting based on computed styles
+              function applyFormattingToElement(element: Element, computedStyle: CSSStyleDeclaration) {
+                const styles: string[] = [];
+                
+                // Font weight (bold)
+                const fontWeight = computedStyle.fontWeight;
+                if (fontWeight === 'bold' || fontWeight === '700' || parseInt(fontWeight) >= 700) {
+                  styles.push('font-weight: bold');
+                  // Also add semantic bold tag if not already present
+                  if (element.tagName !== 'STRONG' && element.tagName !== 'B') {
+                    const strong = document.createElement('strong');
+                    while (element.firstChild) {
+                      strong.appendChild(element.firstChild);
+                    }
+                    element.appendChild(strong);
+                  }
+                }
+                
+                // Font style (italic)
+                const fontStyle = computedStyle.fontStyle;
+                if (fontStyle === 'italic') {
+                  styles.push('font-style: italic');
+                  if (element.tagName !== 'EM' && element.tagName !== 'I') {
+                    const em = document.createElement('em');
+                    while (element.firstChild) {
+                      em.appendChild(element.firstChild);
+                    }
+                    element.appendChild(em);
+                  }
+                }
+                
+                // Text decoration (underline, strikethrough, etc.)
+                const textDecoration = computedStyle.textDecoration || computedStyle.textDecorationLine;
+                if (textDecoration && textDecoration !== 'none' && textDecoration !== 'initial') {
+                  styles.push(`text-decoration: ${textDecoration}`);
+                  if (textDecoration.includes('underline') && element.tagName !== 'U') {
+                    const u = document.createElement('u');
+                    while (element.firstChild) {
+                      u.appendChild(element.firstChild);
+                    }
+                    element.appendChild(u);
+                  }
+                }
+                
+                // Color and background
+                const color = computedStyle.color;
+                const backgroundColor = computedStyle.backgroundColor;
+                if (color && color !== 'rgb(0, 0, 0)' && color !== 'rgba(0, 0, 0, 1)') {
+                  styles.push(`color: ${color}`);
+                }
+                if (backgroundColor && backgroundColor !== 'rgba(0, 0, 0, 0)' && backgroundColor !== 'transparent') {
+                  styles.push(`background-color: ${backgroundColor}`);
+                }
+                
+                // Apply collected styles
+                if (styles.length > 0) {
+                  const existingStyle = element.getAttribute('style') || '';
+                  const newStyle = existingStyle + (existingStyle ? '; ' : '') + styles.join('; ');
+                  element.setAttribute('style', newStyle);
+                }
+              }
+              
+              // Helper to get element path
+              function getElementPath(element: Element, root: Element): string {
+                const path = [];
+                let current = element;
+                while (current && current !== root && current.parentElement) {
+                  const siblings = Array.from(current.parentElement.children);
+                  const index = siblings.indexOf(current);
+                  path.unshift(`${current.tagName.toLowerCase()}:nth-child(${index + 1})`);
+                  current = current.parentElement;
+                }
+                return path.join(' > ');
+              }
+              
+              // Helper to find original element
+              function findOriginalElement(path: string, root: Node): Element | null {
+                try {
+                  return (root as Element).querySelector(path);
+                } catch {
+                  return null;
+                }
+              }
+              
+              // Helper to find original text node
+              function findOriginalTextNode(text: string, range: Range): Text | null {
+                const walker = document.createTreeWalker(
+                  range.commonAncestorContainer,
+                  NodeFilter.SHOW_TEXT,
+                  {
+                    acceptNode: (node: Node) => {
+                      return range.intersectsNode(node) && node.textContent?.includes(text) 
+                        ? NodeFilter.FILTER_ACCEPT 
+                        : NodeFilter.FILTER_SKIP;
+                    }
+                  }
+                );
+                
+                return walker.nextNode() as Text;
+              }
+              
+              // Try methods in order
+              let result = tryNativeHTMLCapture();
+              if (!result || result.trim() === '') {
+                result = tryAggressiveCapture();
+              }
+              
+              return result;
+            }
+            
+            // Fallback to simpler method if the above fails
+            function simpleCaptureHTML() {
+              if (!selection || selection.rangeCount === 0) return '';
+              
+              const container = document.createElement('div');
+              for (let i = 0; i < selection.rangeCount; i++) {
+                container.appendChild(selection.getRangeAt(i).cloneContents());
+              }
+              return container.innerHTML;
+            }
+            
+            let html = '';
+            try {
+              html = captureStyledHTML();
+            } catch (error) {
+              console.warn('Enhanced HTML capture failed, falling back to simple capture:', error);
+              html = simpleCaptureHTML();
+            }
+            
+            return { 
+              html: html,
+              plainText: selection.toString()
+            };
+          }
+        });
+        
+        const selectionData = results[0]?.result;
+        if (selectionData) {
+          await chrome.storage.local.set({ 
+            pendingSnippetText: selectionData.plainText,
+            pendingSnippetHtml: selectionData.html
+          });
+        } else {
+          // Fallback to plain text if script execution fails
+          await chrome.storage.local.set({ pendingSnippetText: info.selectionText });
+        }
+      } catch (error) {
+        console.warn('Failed to get HTML selection, falling back to plain text:', error);
+        await chrome.storage.local.set({ pendingSnippetText: info.selectionText });
+      }
+      
       try {
         await chrome.action.openPopup();
       } catch (e: unknown) {
@@ -142,8 +392,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       if (snippet && tab?.id) {
         chrome.scripting.executeScript({
           target: { tabId: tab.id, allFrames: true },
-          func: pasteTextInActiveElement,
-          args: [snippet.text],
+          func: pasteContentInActiveElement,
+          args: [snippet.text, snippet.html],
         }).catch(err => console.error('Error executing script:', err));
       }
     });
@@ -157,9 +407,317 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
-function pasteTextInActiveElement(textToPaste: string) {
+function pasteContentInActiveElement(textToPaste: string, htmlToPaste?: string) {
   const activeElement = document.activeElement as HTMLInputElement | HTMLTextAreaElement | HTMLElement;
-  if (activeElement && (activeElement.isContentEditable || activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+  
+  if (!activeElement) return;
+  
+  // Method 1: Try execCommand first (works best with rich text editors)
+  function tryExecCommand(): boolean {
+    if (!htmlToPaste || !htmlToPaste.trim()) return false;
+    
+    try {
+      // Focus the element first
+      activeElement.focus();
+      
+      // Try insertHTML command (works in many rich text editors)
+      if (document.queryCommandSupported && document.queryCommandSupported('insertHTML')) {
+        const success = document.execCommand('insertHTML', false, htmlToPaste);
+        if (success) return true;
+      }
+      
+      // Try insertText as fallback
+      if (document.queryCommandSupported && document.queryCommandSupported('insertText')) {
+        return document.execCommand('insertText', false, textToPaste);
+      }
+    } catch (error) {
+      console.warn('execCommand failed:', error);
+    }
+    return false;
+  }
+  
+  // Method 2: Clipboard API approach (modern browsers)
+  function tryClipboardAPI(): boolean {
+    if (!htmlToPaste || !htmlToPaste.trim()) return false;
+    
+    try {
+      activeElement.focus();
+      
+      // Enhance HTML for better compatibility
+      const enhancedHtml = enhanceHtmlForCompatibility(htmlToPaste);
+      
+      // Create clipboard data with both HTML and plain text
+      const clipboardData = new DataTransfer();
+      clipboardData.items.add(enhancedHtml, 'text/html');
+      clipboardData.items.add(textToPaste, 'text/plain');
+      
+      // Also add RTF format for better Office compatibility
+      try {
+        const rtfContent = convertHtmlToRtf(enhancedHtml, textToPaste);
+        clipboardData.items.add(rtfContent, 'text/rtf');
+      } catch (rtfError) {
+        console.warn('RTF generation failed:', rtfError);
+      }
+      
+      // Create and dispatch paste event
+      const pasteEvent = new ClipboardEvent('paste', {
+        clipboardData: clipboardData,
+        bubbles: true,
+        cancelable: true
+      });
+      
+      return activeElement.dispatchEvent(pasteEvent);
+    } catch (error) {
+      console.warn('Clipboard API failed:', error);
+    }
+    return false;
+  }
+  
+  // Helper function to enhance HTML for better compatibility
+  function enhanceHtmlForCompatibility(html: string): string {
+    let enhanced = html;
+    
+    // Replace semantic tags with inline styles for better compatibility
+    enhanced = enhanced.replace(/<strong[^>]*>(.*?)<\/strong>/gi, '<span style="font-weight: bold;">$1</span>');
+    enhanced = enhanced.replace(/<b[^>]*>(.*?)<\/b>/gi, '<span style="font-weight: bold;">$1</span>');
+    enhanced = enhanced.replace(/<em[^>]*>(.*?)<\/em>/gi, '<span style="font-style: italic;">$1</span>');
+    enhanced = enhanced.replace(/<i[^>]*>(.*?)<\/i>/gi, '<span style="font-style: italic;">$1</span>');
+    enhanced = enhanced.replace(/<u[^>]*>(.*?)<\/u>/gi, '<span style="text-decoration: underline;">$1</span>');
+    
+    // Ensure proper paragraph wrapping
+    if (!enhanced.includes('<p') && !enhanced.includes('<div') && !enhanced.includes('<ul') && !enhanced.includes('<ol')) {
+      enhanced = `<p>${enhanced}</p>`;
+    }
+    
+    return enhanced;
+  }
+  
+  // Helper function to convert HTML to RTF (simplified)
+  function convertHtmlToRtf(html: string, plainText: string): string {
+    try {
+      let rtf = '{\\rtf1\\ansi\\deff0 {\\fonttbl {\\f0 Times New Roman;}}\\f0\\fs24 ';
+      
+      // Simple HTML to RTF conversion
+      let content = html;
+      
+      // Bold formatting
+      content = content.replace(/<(?:strong|b)[^>]*>(.*?)<\/(?:strong|b)>/gi, '{\\b $1}');
+      content = content.replace(/<span[^>]*font-weight:\s*bold[^>]*>(.*?)<\/span>/gi, '{\\b $1}');
+      
+      // Italic formatting  
+      content = content.replace(/<(?:em|i)[^>]*>(.*?)<\/(?:em|i)>/gi, '{\\i $1}');
+      content = content.replace(/<span[^>]*font-style:\s*italic[^>]*>(.*?)<\/span>/gi, '{\\i $1}');
+      
+      // Underline formatting
+      content = content.replace(/<u[^>]*>(.*?)<\/u>/gi, '{\\ul $1}');
+      content = content.replace(/<span[^>]*text-decoration:\s*underline[^>]*>(.*?)<\/span>/gi, '{\\ul $1}');
+      
+      // Remove other HTML tags
+      content = content.replace(/<[^>]+>/g, '');
+      
+      // Add line breaks
+      content = content.replace(/\n/g, '\\par ');
+      
+      rtf += content + '}';
+      
+      return rtf;
+    } catch (error) {
+      console.warn('RTF conversion failed:', error);
+      return '';
+    }
+  }
+  
+  // Method 3: Selection/Range API approach
+  function trySelectionAPI(): boolean {
+    if (!activeElement.isContentEditable) return false;
+    
+    try {
+      activeElement.focus();
+      const selection = window.getSelection();
+      
+      if (!selection || selection.rangeCount === 0) {
+        // Create a range at the end of the element
+        const range = document.createRange();
+        range.selectNodeContents(activeElement);
+        range.collapse(false);
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+      
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        
+        if (htmlToPaste && htmlToPaste.trim()) {
+          // Create a temporary container
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = htmlToPaste;
+          
+          // Create document fragment
+          const fragment = document.createDocumentFragment();
+          while (tempDiv.firstChild) {
+            fragment.appendChild(tempDiv.firstChild);
+          }
+          
+          range.insertNode(fragment);
+          
+          // Position cursor after inserted content
+          range.collapse(false);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          
+          return true;
+        }
+      }
+    } catch (error) {
+      console.warn('Selection API failed:', error);
+    }
+    return false;
+  }
+  
+  // Method 4: Input event simulation
+  function tryInputEvent(): boolean {
+    try {
+      activeElement.focus();
+      
+      if (htmlToPaste && htmlToPaste.trim() && activeElement.isContentEditable) {
+        // Direct innerHTML manipulation for some editors
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = htmlToPaste;
+          
+          range.deleteContents();
+          
+          // Insert nodes one by one
+          const nodes = Array.from(tempDiv.childNodes);
+          for (const node of nodes) {
+            range.insertNode(node.cloneNode(true));
+            range.collapse(false);
+          }
+          
+          // Trigger input event to notify the editor
+          activeElement.dispatchEvent(new InputEvent('input', {
+            bubbles: true,
+            cancelable: true,
+            inputType: 'insertText',
+            data: textToPaste
+          }));
+          
+          return true;
+        }
+      }
+    } catch (error) {
+      console.warn('Input event simulation failed:', error);
+    }
+    return false;
+  }
+  
+  // Method 5: Platform-specific approaches
+  function tryPlatformSpecific(): boolean {
+    const url = window.location.href;
+    
+    // LinkedIn specific handling
+    if (url.includes('linkedin.com')) {
+      try {
+        activeElement.focus();
+        
+        // For LinkedIn newsletter editor
+        if (url.includes('/newsletter/') || activeElement.closest('[data-editor-type]')) {
+          // Try setting innerHTML directly for LinkedIn's editor
+          if (htmlToPaste && activeElement.isContentEditable) {
+            const selection = window.getSelection();
+            if (selection && selection.rangeCount > 0) {
+              const range = selection.getRangeAt(0);
+              range.deleteContents();
+              
+              // Create a wrapper span with formatting
+              const wrapper = document.createElement('span');
+              wrapper.innerHTML = htmlToPaste;
+              range.insertNode(wrapper);
+              
+              // Move cursor to end
+              range.setStartAfter(wrapper);
+              range.collapse(true);
+              selection.removeAllRanges();
+              selection.addRange(range);
+              
+              return true;
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('LinkedIn specific method failed:', error);
+      }
+    }
+    
+    // Google Docs specific
+    if (url.includes('docs.google.com')) {
+      try {
+        activeElement.focus();
+        
+        // Google Docs requires very specific HTML formatting
+        if (htmlToPaste && htmlToPaste.trim()) {
+          // Create Google Docs optimized HTML
+          let googleHtml = htmlToPaste;
+          
+          // Convert to Google Docs preferred format
+          googleHtml = googleHtml.replace(/<strong[^>]*>(.*?)<\/strong>/gi, '<b>$1</b>');
+          googleHtml = googleHtml.replace(/<em[^>]*>(.*?)<\/em>/gi, '<i>$1</i>');
+          googleHtml = googleHtml.replace(/<span[^>]*font-weight:\s*bold[^>]*>(.*?)<\/span>/gi, '<b>$1</b>');
+          googleHtml = googleHtml.replace(/<span[^>]*font-style:\s*italic[^>]*>(.*?)<\/span>/gi, '<i>$1</i>');
+          googleHtml = googleHtml.replace(/<span[^>]*text-decoration:\s*underline[^>]*>(.*?)<\/span>/gi, '<u>$1</u>');
+          
+          // Wrap in a proper document structure for Google Docs
+          const fullHtml = `<meta charset="utf-8"><div>${googleHtml}</div>`;
+          
+          // Try multiple approaches for Google Docs
+          const clipboardData = new DataTransfer();
+          clipboardData.items.add(fullHtml, 'text/html');
+          clipboardData.items.add(textToPaste, 'text/plain');
+          
+          // Add specific MIME types that Google Docs recognizes
+          try {
+            clipboardData.items.add(fullHtml, 'application/x-vnd.google-docs-document-slice-clip+wrapped');
+          } catch (mimeError) {
+            console.warn('Google Docs MIME type failed:', mimeError);
+          }
+          
+          const pasteEvent = new ClipboardEvent('paste', {
+            clipboardData: clipboardData,
+            bubbles: true,
+            cancelable: true
+          });
+          
+          // Dispatch to the specific Google Docs editor element
+          const googleEditor = document.querySelector('[role="textbox"], .kix-canvas-tile-content, .docs-texteventtarget-iframe') || activeElement;
+          if (googleEditor) {
+            if (googleEditor instanceof HTMLElement) {
+              googleEditor.focus();
+            }
+            const success = googleEditor.dispatchEvent(pasteEvent);
+            if (success) return true;
+          }
+          
+          // Fallback to execCommand for Google Docs
+          if (document.queryCommandSupported && document.queryCommandSupported('insertHTML')) {
+            return document.execCommand('insertHTML', false, googleHtml);
+          }
+        }
+        
+        // Final fallback for Google Docs
+        return tryClipboardAPI();
+      } catch (error) {
+        console.warn('Google Docs specific method failed:', error);
+      }
+    }
+    
+    return false;
+  }
+  
+  // Method 6: Fallback to input/textarea
+  function fallbackToPlainText(): boolean {
     if ('value' in activeElement && typeof activeElement.value === 'string') {
       const el = activeElement as HTMLInputElement | HTMLTextAreaElement;
       const start = typeof el.selectionStart === 'number' ? el.selectionStart : el.value.length;
@@ -168,25 +726,38 @@ function pasteTextInActiveElement(textToPaste: string) {
       const newCursorPosition = start + textToPaste.length;
       el.selectionStart = newCursorPosition;
       el.selectionEnd = newCursorPosition;
-    } else if (activeElement.isContentEditable) {
-      const selection = window.getSelection();
-      if (selection && selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
-        range.deleteContents();
-        range.insertNode(document.createTextNode(textToPaste));
-        range.collapse(false);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      } else {
-        // Fallback for older browsers
-        const textNode = document.createTextNode(textToPaste);
-        const range = document.createRange();
-        range.selectNodeContents(activeElement);
-        range.collapse(false);
-        range.insertNode(textNode);
+      return true;
+    }
+    return false;
+  }
+  
+  // Try methods in order of preference
+  const methods = [
+    tryExecCommand,
+    tryClipboardAPI,
+    tryPlatformSpecific,
+    trySelectionAPI,
+    tryInputEvent,
+    fallbackToPlainText
+  ];
+  
+  for (const method of methods) {
+    try {
+      if (method()) {
+        console.log(`Paste successful with method: ${method.name}`);
+        return;
       }
+    } catch (error) {
+      console.warn(`Method ${method.name} failed:`, error);
     }
   }
+  
+  console.warn('All paste methods failed, content may not have been inserted correctly');
+}
+
+// Legacy function for backward compatibility
+function pasteTextInActiveElement(textToPaste: string) {
+  return pasteContentInActiveElement(textToPaste);
 }
 
 async function updatePasteContextMenu() {
@@ -300,6 +871,8 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
 async function handlePasteRequest(snippet: Snippet) {
   // DOMPurify is not available in the background service worker; use plain text
   const sanitizedText = snippet.text;
+  const sanitizedHtml = snippet.html; // HTML is already captured, no need to sanitize further for basic formatting
+  console.log('Pasting snippet:', { text: sanitizedText, html: sanitizedHtml }); // Debug log
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return;
 
@@ -312,8 +885,8 @@ async function handlePasteRequest(snippet: Snippet) {
   if (injectionResults.some((r: chrome.scripting.InjectionResult) => r.result)) {
     chrome.scripting.executeScript({
       target: { tabId: tab.id, allFrames: true },
-      func: pasteTextInActiveElement,
-      args: [sanitizedText],
+      func: pasteContentInActiveElement,
+      args: [sanitizedText, sanitizedHtml],
     }).catch(err => console.error('Error pasting text:', err));
   } else {
     // If not editable, or if it's the address bar, copy to clipboard and notify

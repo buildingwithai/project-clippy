@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
+import { YooptaRichEditor } from '@/components/ui/yoopta-rich-editor';
 
 import type { Snippet, Folder } from '../../utils/types';
 
@@ -17,10 +17,12 @@ interface SnippetFormModalProps {
     id?: string;
     title: string;
     text: string;
+    html?: string;
     folderId: string | null;
   }) => void;
   snippetToEdit?: Snippet | null;
   initialText?: string; // New: text to pre-populate when creating a new snippet
+  initialHtml?: string; // New: HTML to pre-populate when creating a new snippet
   folders: Folder[];
 }
 
@@ -30,43 +32,66 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
   onSave,
   snippetToEdit,
   initialText,
+  initialHtml,
   folders,
 }) => {
   const [title, setTitle] = useState('');
   const [text, setText] = useState('');
+  const [html, setHtml] = useState<string | undefined>(undefined);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (snippetToEdit) {
+    console.log('SnippetFormModal useEffect - snippetToEdit:', snippetToEdit, 'initialText:', initialText, 'initialHtml:', initialHtml, 'isOpen:', isOpen); // Debug log
+    
+    if (isOpen && snippetToEdit) {
+      console.log('Setting snippet to edit - text:', snippetToEdit.text, 'html:', snippetToEdit.html); // Debug log
       setTitle(snippetToEdit.title || ''); // Fallback for optional title
-      setText(snippetToEdit.text);
+      setText(snippetToEdit.text || ''); // Ensure we always have a string
+      setHtml(snippetToEdit.html || ''); // Use empty string instead of undefined
       setSelectedFolderId(snippetToEdit.folderId || null); // folderId is optional in Snippet, maps to null for modal state
-    } else if (initialText) {
+    } else if (isOpen && initialText) {
       // Creating new snippet with pre-populated text (e.g., from context menu)
+      console.log('Setting initial text:', initialText, 'initialHtml:', initialHtml); // Debug log
       setTitle('');
       setText(initialText);
+      setHtml(initialHtml || '');
       setSelectedFolderId(null);
-    } else {
+    } else if (isOpen) {
       // Reset form for new snippet without initial text
+      console.log('Resetting form for new snippet'); // Debug log
       setTitle('');
       setText('');
+      setHtml('');
       setSelectedFolderId(null);
     }
-  }, [snippetToEdit, initialText, isOpen]); // Re-run effect if isOpen changes to reset form when re-opened for new snippet
+  }, [snippetToEdit, initialText, initialHtml, isOpen]); // Re-run effect if isOpen changes to reset form when re-opened for new snippet
+
+  // Handle rich text editor content change
+  const handleEditorChange = (content: { html: string; text: string }) => {
+    setText(content.text);
+    setHtml(content.html);
+  };
 
   const handleSubmit = () => {
+    console.log('🔍 Form state at submit:');
+    console.log('🔍 title:', title);
+    console.log('🔍 text:', text);
+    console.log('🔍 html:', html);
+    
     if (!title.trim() || !text.trim()) {
-      // Basic validation: title and text are required
-      // TODO: Add more robust validation and user feedback (e.g., toast notifications)
-      alert('Title and Snippet text cannot be empty.');
+      console.log('🔍 Validation failed - title empty:', !title.trim(), 'text empty:', !text.trim());
+      alert('Title and Snippet content cannot be empty.');
       return;
     }
-    onSave({
+    const snippetData = {
       id: snippetToEdit?.id,
       title: title.trim(),
       text: text.trim(),
+      html: html || undefined, // Include HTML if available
       folderId: selectedFolderId,
-    });
+    };
+    console.log('🔍 Saving snippet with data:', snippetData); // Debug log
+    onSave(snippetData);
     onClose(); // Close modal after save
   };
 
@@ -75,6 +100,9 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
       onClose();
     }
   };
+
+  // Debug log before rendering
+  console.log('SnippetFormModal render - text state:', text, 'html state:', html, 'snippetToEdit:', snippetToEdit?.id);
 
   if (!isOpen) {
     return null;
@@ -126,15 +154,14 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
             </Select>
           </div>
           <div className="grid grid-cols-1 items-start gap-2">
-            <Label htmlFor="text" className="text-left mb-1">
-              Snippet Code / Text
+            <Label htmlFor="content" className="text-left mb-1">
+              Snippet Content
             </Label>
-            <Textarea
-              id="text"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              className="col-span-1 min-h-[100px] bg-slate-800 text-slate-100 border border-slate-700 placeholder:text-slate-400 rounded-md shadow-none focus-visible:ring-2 focus-visible:ring-sky-500"
-              placeholder="Paste your code or type your note here..."
+            <YooptaRichEditor
+              initialHtml={snippetToEdit?.html || initialHtml || undefined}
+              onChange={handleEditorChange}
+              placeholder="Enter your snippet content here... Use / to access formatting options."
+              className="min-h-[120px]"
             />
           </div>
         </div>

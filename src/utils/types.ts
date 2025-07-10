@@ -5,7 +5,8 @@
 export interface Snippet {
   id: string;
   title?: string; // Optional title
-  text: string;    // The snippet content
+  text: string;    // The snippet content (plain text)
+  html?: string;   // Optional: HTML content for rich formatting
   createdAt: string; // ISO date string for when it was created
   folderId?: string; // Optional: ID of the folder this snippet belongs to
   tags?: string[];   // Optional tags for better organization

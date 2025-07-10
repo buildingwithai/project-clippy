@@ -11,7 +11,7 @@ import { formatDateToMD, formatCount } from '@/utils/format';
 interface SnippetItemProps {
   snippet: Snippet;
   copiedSnippetId: string | null;
-  onCopyToClipboard: (text: string, snippetId: string) => void;
+  onCopyToClipboard: (text: string, snippetId: string, html?: string) => void;
   onOpenEditModal: (snippet: Snippet) => void;
   onPinSnippet: (snippetId: string) => void;
   onDeleteSnippet: (snippetId: string) => void;
@@ -69,7 +69,7 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
               variant="ghost"
               size="icon"
               className="h-7 w-7 text-slate-400 hover:text-green-400"
-              onClick={() => onCopyToClipboard(snippet.text, snippet.id)}
+              onClick={() => onCopyToClipboard(snippet.text, snippet.id, snippet.html)}
               aria-label="Copy snippet"
             >
               {copiedSnippetId === snippet.id ? (
@@ -122,7 +122,91 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
           </Badge>
         )}
       </div>
-      <pre className="text-sm text-slate-300 bg-slate-900/50 p-2.5 rounded-md whitespace-pre-wrap break-all max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">{snippet.text}</pre>
+      <div className="text-sm text-slate-300 bg-slate-900/50 p-2.5 rounded-md max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
+        {snippet.html ? (
+          <div 
+            className="whitespace-pre-wrap break-all snippet-html-content"
+            dangerouslySetInnerHTML={{ __html: snippet.html }} 
+          />
+        ) : (
+          <pre className="whitespace-pre-wrap break-all">{snippet.text}</pre>
+        )}
+      </div>
+      
+      {/* Styles for HTML content in snippets */}
+      <style dangerouslySetInnerHTML={{
+        __html: `
+          .snippet-html-content h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #94a3b8;
+            margin: 0.5rem 0;
+            line-height: 1.4;
+          }
+          .snippet-html-content h2 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: #94a3b8;
+            margin: 0.5rem 0;
+            line-height: 1.4;
+          }
+          .snippet-html-content h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #94a3b8;
+            margin: 0.5rem 0;
+            line-height: 1.4;
+          }
+          .snippet-html-content ul {
+            list-style-type: disc;
+            margin-left: 1.5rem;
+            margin: 0.5rem 0;
+          }
+          .snippet-html-content ol {
+            list-style-type: decimal;
+            margin-left: 1.5rem;
+            margin: 0.5rem 0;
+          }
+          .snippet-html-content li {
+            margin: 0.25rem 0;
+            color: #cbd5e1;
+          }
+          .snippet-html-content p {
+            margin: 0.5rem 0;
+            color: #cbd5e1;
+            line-height: 1.5;
+          }
+          .snippet-html-content blockquote {
+            border-left: 4px solid #475569;
+            padding-left: 1rem;
+            margin: 0.5rem 0;
+            color: #94a3b8;
+            font-style: italic;
+          }
+          .snippet-html-content code {
+            background-color: #1e293b;
+            color: #fbbf24;
+            padding: 0.125rem 0.25rem;
+            border-radius: 0.25rem;
+            font-size: 0.875rem;
+          }
+          .snippet-html-content pre {
+            background-color: #1e293b;
+            padding: 0.75rem;
+            border-radius: 0.375rem;
+            overflow-x: auto;
+            margin: 0.5rem 0;
+          }
+          .snippet-html-content strong, .snippet-html-content b {
+            font-weight: 600;
+            color: #f1f5f9;
+          }
+          .snippet-html-content em, .snippet-html-content i {
+            font-style: italic;
+            color: #e2e8f0;
+          }
+        `
+      }} />
     </motion.div>
   );
 };

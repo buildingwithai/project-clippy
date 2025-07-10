@@ -221,6 +221,7 @@ const App: React.FC = () => {
 
   // Text coming from context menu selection to pre-populate new snippet
   const [initialSnippetText, setInitialSnippetText] = useState<string | null>(null);
+  const [initialSnippetHtml, setInitialSnippetHtml] = useState<string | null>(null);
   const [folderError, setFolderError] = useState<string | null>(null); // For folder-specific errors
 
   // Refs
@@ -231,7 +232,7 @@ const App: React.FC = () => {
   const loadSnippetsAndFolders = useCallback(async () => {
     setIsLoading(true);
     try {
-      const result = await chrome.storage.local.get(['snippets', 'folders', 'pendingSnippetText']);
+      const result = await chrome.storage.local.get(['snippets', 'folders', 'pendingSnippetText', 'pendingSnippetHtml']);
       const loadedSnippets: Snippet[] = result.snippets || [];
       const loadedFolders: Folder[] = result.folders || [];
 
@@ -240,8 +241,8 @@ const App: React.FC = () => {
 
       if (result.pendingSnippetText) {
         console.log('Pending snippet text found, opening new snippet modal:', result.pendingSnippetText);
-        handleOpenNewSnippetModalWithText(result.pendingSnippetText); 
-        await chrome.storage.local.remove('pendingSnippetText');
+        handleOpenNewSnippetModalWithText(result.pendingSnippetText, result.pendingSnippetHtml); 
+        await chrome.storage.local.remove(['pendingSnippetText', 'pendingSnippetHtml']);
       }
       setError(null);
     } catch (e) {
@@ -424,9 +425,18 @@ const App: React.FC = () => {
   
   
   // Handle copying snippet text to clipboard
-  const handleCopyToClipboard = async (text: string, snippetId: string) => {
+  const handleCopyToClipboard = async (text: string, snippetId: string, html?: string) => {
     try {
-      await navigator.clipboard.writeText(text);
+      if (html) {
+        // Use ClipboardItem for rich content
+        const clipboardItem = new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([text], { type: 'text/plain' })
+        });
+        await navigator.clipboard.write([clipboardItem]);
+      } else {
+        await navigator.clipboard.writeText(text);
+      }
       setCopiedSnippetId(snippetId);
       setTimeout(() => setCopiedSnippetId(null), 2000); // Reset after 2 seconds
 
@@ -446,8 +456,9 @@ const App: React.FC = () => {
   };
 
   // Helper to open new snippet modal with pre-filled text (used from context menu)
-  const handleOpenNewSnippetModalWithText = (text: string) => {
+  const handleOpenNewSnippetModalWithText = (text: string, html?: string) => {
     setInitialSnippetText(text);
+    setInitialSnippetHtml(html || null);
     setEditingSnippet(null);
     setIsSnippetModalOpen(true);
   };
@@ -469,17 +480,18 @@ const App: React.FC = () => {
     setIsSnippetModalOpen(false);
     setEditingSnippet(null);
     setInitialSnippetText(null);
+    setInitialSnippetHtml(null);
   };
 
   // Handle saving snippet from modal (create or update)
-  const handleSaveFromModal = async (snippetData: { title: string; text: string; folderId: string | null; id?: string }) => {
+  const handleSaveFromModal = async (snippetData: { title: string; text: string; html?: string; folderId: string | null; id?: string }) => {
     let updatedSnippets;
     const finalFolderId = (snippetData.folderId === '' || snippetData.folderId === null) ? undefined : snippetData.folderId;
 
     if (snippetData.id) { // Editing existing snippet
       updatedSnippets = snippets.map(s =>
         s.id === snippetData.id
-          ? { ...s, title: snippetData.title.trim(), text: snippetData.text.trim(), folderId: finalFolderId, createdAt: s.createdAt } // Preserve original createdAt
+          ? { ...s, title: snippetData.title.trim(), text: snippetData.text.trim(), html: snippetData.html, folderId: finalFolderId, createdAt: s.createdAt } // Preserve original createdAt
           : s
       );
     } else { // New snippet
@@ -487,6 +499,7 @@ const App: React.FC = () => {
         id: `snippet-${Date.now()}`,
         title: snippetData.title.trim(),
         text: snippetData.text.trim(),
+        html: snippetData.html,
         folderId: finalFolderId,
         createdAt: new Date().toISOString(),
         frequency: 0,
@@ -663,6 +676,7 @@ const App: React.FC = () => {
           folders={folders}
           snippetToEdit={editingSnippet}
           initialText={!editingSnippet ? initialSnippetText ?? undefined : undefined}
+          initialHtml={!editingSnippet ? initialSnippetHtml ?? undefined : undefined}
         />
       )}
     </>
