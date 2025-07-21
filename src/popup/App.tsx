@@ -10,9 +10,29 @@ import { GlowingButton } from '@/components/ui/glowing-button';
 import type { Snippet, Folder } from '../utils/types';
 import { SnippetFormModal } from './components/SnippetFormModal';
 import { SnippetItem } from './components/SnippetItem';
+import { SortableSnippetItem } from './components/SortableSnippetItem';
 import type { TopTab } from './components/TopTabs';
 import { BankToggle } from './components/BankToggle';
 import { BankView, RemotePackMeta } from './components/BankView';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+  DragOverEvent,
+  DragOverlay,
+  DragStartEvent,
+  UniqueIdentifier,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { createPortal } from 'react-dom';
 
 const App: React.FC = () => {
   // State for snippets and folders
@@ -41,6 +61,9 @@ const App: React.FC = () => {
 
   // UI state
   const [isFoldersCollapsed, setIsFoldersCollapsed] = useState(false);
+  
+  // Drag and drop state
+  const [activeSnippet, setActiveSnippet] = useState<Snippet | null>(null);
   // Remote snippet packs
   const [packs, setPacks] = useState<RemotePackMeta[]>([]);
   const [importedPackIds, setImportedPackIds] = useState<Set<string>>(new Set());
@@ -226,6 +249,29 @@ const App: React.FC = () => {
 
   // Refs
   const newFolderInputRef = useRef<HTMLInputElement>(null);
+  
+  // Configure drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // 8px of movement before drag starts
+      },
+    }),
+    useSensor(KeyboardSensor)
+  );
+  
+  // Helper function to get snippet IDs for SortableContext
+  const getSnippetIds = (snippetList: Snippet[]): string[] => {
+    return snippetList.map(snippet => snippet.id);
+  };
+  
+  // Helper function to assign sort orders to snippets
+  const assignSortOrders = (snippetList: Snippet[], startIndex: number = 0): Snippet[] => {
+    return snippetList.map((snippet, index) => ({
+      ...snippet,
+      sortOrder: startIndex + index
+    }));
+  };
 
 
   // Load snippets and folders from storage
@@ -413,11 +459,23 @@ const App: React.FC = () => {
 
     const pinned = filtered
       .filter(s => s.isPinned)
-      .sort((a, b) => new Date(b.pinnedAt!).getTime() - new Date(a.pinnedAt!).getTime());
+      .sort((a, b) => {
+        // Use sortOrder if both have it, otherwise fall back to pinnedAt
+        if (a.sortOrder !== undefined && b.sortOrder !== undefined) {
+          return a.sortOrder - b.sortOrder;
+        }
+        return new Date(b.pinnedAt!).getTime() - new Date(a.pinnedAt!).getTime();
+      });
 
     const others = filtered
       .filter(s => !s.isPinned)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      .sort((a, b) => {
+        // Use sortOrder if both have it, otherwise fall back to createdAt
+        if (a.sortOrder !== undefined && b.sortOrder !== undefined) {
+          return a.sortOrder - b.sortOrder;
+        }
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
 
     return { pinnedSnippets: pinned, otherSnippets: others };
   }, [snippets, searchTerm, activeFilterFolderId]);
@@ -526,17 +584,152 @@ const App: React.FC = () => {
   // Handle pinning a snippet
   const handlePinSnippet = async (snippetId: string) => {
     try {
-      const updatedSnippets = snippets.map(s =>
-        s.id === snippetId
-          ? { ...s, isPinned: !s.isPinned, pinnedAt: !s.isPinned ? new Date().toISOString() : undefined }
-          : s
-      );
+      const snippet = snippets.find(s => s.id === snippetId);
+      if (!snippet) return;
+      
+      const isPinning = !snippet.isPinned;
+      
+      let updatedSnippets;
+      if (isPinning) {
+        // When pinning, add to top of pinned section
+        const pinnedWithoutThis = snippets.filter(s => s.isPinned && s.id !== snippetId);
+        const reassignedPinned = assignSortOrders(pinnedWithoutThis, 1); // Start from 1, 0 will be for new pinned
+        
+        updatedSnippets = snippets.map(s => {
+          if (s.id === snippetId) {
+            return { ...s, isPinned: true, pinnedAt: new Date().toISOString(), sortOrder: 0 };
+          } else if (s.isPinned) {
+            const reassigned = reassignedPinned.find(p => p.id === s.id);
+            return reassigned || s;
+          }
+          return s;
+        });
+      } else {
+        // When unpinning, add to top of unpinned section
+        const unpinnedWithoutThis = snippets.filter(s => !s.isPinned && s.id !== snippetId);
+        const reassignedUnpinned = assignSortOrders(unpinnedWithoutThis, 1); // Start from 1, 0 will be for new unpinned
+        
+        updatedSnippets = snippets.map(s => {
+          if (s.id === snippetId) {
+            return { ...s, isPinned: false, pinnedAt: undefined, sortOrder: 0 };
+          } else if (!s.isPinned) {
+            const reassigned = reassignedUnpinned.find(p => p.id === s.id);
+            return reassigned || s;
+          }
+          return s;
+        });
+      }
+      
       setSnippets(updatedSnippets); // Optimistic update
       await chrome.storage.local.set({ snippets: updatedSnippets });
     } catch (error) {
       console.error('Failed to pin snippet:', error);
       setError('Failed to update pin status. Please try again.');
       // Optional: Revert optimistic update on error
+      loadSnippetsAndFolders();
+    }
+  };
+  
+  // Handle drag start
+  const handleDragStart = (event: DragStartEvent) => {
+    const { active } = event;
+    const snippet = snippets.find(s => s.id === active.id);
+    setActiveSnippet(snippet || null);
+  };
+  
+  // Handle drag end
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveSnippet(null);
+    
+    if (!over || active.id === over.id) {
+      return;
+    }
+    
+    const activeSnippet = snippets.find(s => s.id === active.id);
+    const overSnippet = snippets.find(s => s.id === over.id);
+    
+    if (!activeSnippet) return;
+    
+    try {
+      let updatedSnippets: Snippet[];
+      
+      // Check if this is a cross-section drag (pinned <-> unpinned)
+      const activeIsPinned = activeSnippet.isPinned;
+      const overIsPinned = overSnippet?.isPinned;
+      
+      if (activeIsPinned !== overIsPinned && overSnippet) {
+        // Cross-section drag: pin/unpin the active snippet
+        const newPinnedState = overIsPinned || false;
+        
+        if (newPinnedState) {
+          // Moving to pinned section
+          const targetSection = pinnedSnippets;
+          const overIndex = targetSection.findIndex(s => s.id === over.id);
+          const newOrder = assignSortOrders([
+            ...targetSection.slice(0, overIndex),
+            { ...activeSnippet, isPinned: true, pinnedAt: new Date().toISOString() },
+            ...targetSection.slice(overIndex)
+          ]);
+          
+          updatedSnippets = snippets.map(s => {
+            if (s.id === activeSnippet.id) {
+              const reordered = newOrder.find(n => n.id === s.id);
+              return reordered || { ...s, isPinned: true, pinnedAt: new Date().toISOString() };
+            }
+            if (s.isPinned && s.id !== activeSnippet.id) {
+              const reordered = newOrder.find(n => n.id === s.id);
+              return reordered || s;
+            }
+            return s;
+          });
+        } else {
+          // Moving to unpinned section
+          const targetSection = otherSnippets;
+          const overIndex = targetSection.findIndex(s => s.id === over.id);
+          const newOrder = assignSortOrders([
+            ...targetSection.slice(0, overIndex),
+            { ...activeSnippet, isPinned: false, pinnedAt: undefined },
+            ...targetSection.slice(overIndex)
+          ]);
+          
+          updatedSnippets = snippets.map(s => {
+            if (s.id === activeSnippet.id) {
+              const reordered = newOrder.find(n => n.id === s.id);
+              return reordered || { ...s, isPinned: false, pinnedAt: undefined };
+            }
+            if (!s.isPinned && s.id !== activeSnippet.id) {
+              const reordered = newOrder.find(n => n.id === s.id);
+              return reordered || s;
+            }
+            return s;
+          });
+        }
+      } else {
+        // Same-section reordering
+        const targetSection = activeIsPinned ? pinnedSnippets : otherSnippets;
+        const activeIndex = targetSection.findIndex(s => s.id === active.id);
+        const overIndex = targetSection.findIndex(s => s.id === over.id);
+        
+        if (activeIndex !== -1 && overIndex !== -1) {
+          const reorderedSection = arrayMove(targetSection, activeIndex, overIndex);
+          const newOrder = assignSortOrders(reorderedSection);
+          
+          // Update the snippets with new sort orders
+          updatedSnippets = snippets.map(s => {
+            const reordered = newOrder.find(n => n.id === s.id);
+            return reordered || s;
+          });
+        } else {
+          updatedSnippets = snippets;
+        }
+      }
+      
+      setSnippets(updatedSnippets);
+      await chrome.storage.local.set({ snippets: updatedSnippets });
+    } catch (error) {
+      console.error('Failed to reorder snippets:', error);
+      setError('Failed to reorder snippets. Please try again.');
       loadSnippetsAndFolders();
     }
   };
@@ -561,8 +754,14 @@ const App: React.FC = () => {
 
   return (
     <>
-      <div className="h-screen bg-background text-slate-100 flex flex-col">
-                <FolderTabs
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="h-screen bg-background text-slate-100 flex flex-col">
+                  <FolderTabs
           folders={folders}
           activeFilterFolderId={activeFilterFolderId}
           setActiveFilterFolderId={setActiveFilterFolderId}
@@ -621,20 +820,25 @@ const App: React.FC = () => {
               {activeTab !== 'bank' && pinnedSnippets.length > 0 && (
                 <section>
                   <h3 className="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-2">Pinned</h3>
-                  <div className="space-y-3">
-                    {pinnedSnippets.map((snippet) => (
-                      <SnippetItem
-                        key={snippet.id}
-                        snippet={snippet}
-                        copiedSnippetId={copiedSnippetId}
-                        onCopyToClipboard={handleCopyToClipboard}
-                        onOpenEditModal={handleOpenEditSnippetModal}
-                        onPinSnippet={handlePinSnippet}
-                        onDeleteSnippet={handleDeleteSnippet}
-                        getFolderById={getFolderById}
-                      />
-                    ))}
-                  </div>
+                  <SortableContext
+                    items={getSnippetIds(pinnedSnippets)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="space-y-3">
+                      {pinnedSnippets.map((snippet) => (
+                        <SortableSnippetItem
+                          key={snippet.id}
+                          snippet={snippet}
+                          copiedSnippetId={copiedSnippetId}
+                          onCopyToClipboard={handleCopyToClipboard}
+                          onOpenEditModal={handleOpenEditSnippetModal}
+                          onPinSnippet={handlePinSnippet}
+                          onDeleteSnippet={handleDeleteSnippet}
+                          getFolderById={getFolderById}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
                 </section>
               )}
 
@@ -647,26 +851,47 @@ const App: React.FC = () => {
               {otherSnippets.length > 0 && (
                 <section>
                   {pinnedSnippets.length > 0 && <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2 pt-2">All Snippets</h3>}
-                  <div className="space-y-3">
-                    {otherSnippets.map((snippet) => (
-                      <SnippetItem
-                        key={snippet.id}
-                        snippet={snippet}
-                        copiedSnippetId={copiedSnippetId}
-                        onCopyToClipboard={handleCopyToClipboard}
-                        onOpenEditModal={handleOpenEditSnippetModal}
-                        onPinSnippet={handlePinSnippet}
-                        onDeleteSnippet={handleDeleteSnippet}
-                        getFolderById={getFolderById}
-                      />
-                    ))}
-                  </div>
+                  <SortableContext
+                    items={getSnippetIds(otherSnippets)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="space-y-3">
+                      {otherSnippets.map((snippet) => (
+                        <SortableSnippetItem
+                          key={snippet.id}
+                          snippet={snippet}
+                          copiedSnippetId={copiedSnippetId}
+                          onCopyToClipboard={handleCopyToClipboard}
+                          onOpenEditModal={handleOpenEditSnippetModal}
+                          onPinSnippet={handlePinSnippet}
+                          onDeleteSnippet={handleDeleteSnippet}
+                          getFolderById={getFolderById}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
                 </section>
               )}
             </div>
           </ScrollArea>
         </main>
-      </div>
+        </div>
+        
+        {/* Drag Overlay */}
+        <DragOverlay>
+          {activeSnippet ? (
+            <SnippetItem
+              snippet={activeSnippet}
+              copiedSnippetId={copiedSnippetId}
+              onCopyToClipboard={handleCopyToClipboard}
+              onOpenEditModal={handleOpenEditSnippetModal}
+              onPinSnippet={handlePinSnippet}
+              onDeleteSnippet={handleDeleteSnippet}
+              getFolderById={getFolderById}
+            />
+          ) : null}
+        </DragOverlay>
+      </DndContext>
 
       {isSnippetModalOpen && (
         <SnippetFormModal

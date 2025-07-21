@@ -14,6 +14,7 @@ export interface Snippet {
   frequency?: number; // Optional: How many times it has been used
   isPinned?: boolean; // Optional: True if the snippet is pinned
   pinnedAt?: string;  // Optional: ISO date string for when it was pinned
+  sortOrder?: number; // Optional: Custom sort order for drag and drop reordering
 }
 
 export interface Folder {
