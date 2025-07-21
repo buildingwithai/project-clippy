@@ -39,6 +39,8 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
   const [text, setText] = useState('');
   const [html, setHtml] = useState<string | undefined>(undefined);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  
+  // Remove manual slash command state - using YooptaRichEditor for both modes
 
   useEffect(() => {
     console.log('SnippetFormModal useEffect - snippetToEdit:', snippetToEdit, 'initialText:', initialText, 'initialHtml:', initialHtml, 'isOpen:', isOpen); // Debug log
@@ -66,11 +68,19 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
     }
   }, [snippetToEdit, initialText, initialHtml, isOpen]); // Re-run effect if isOpen changes to reset form when re-opened for new snippet
 
+  // Remove manual slash command menu effect - using YooptaRichEditor for both modes
+
   // Handle rich text editor content change
   const handleEditorChange = (content: { html: string; text: string }) => {
     setText(content.text);
     setHtml(content.html);
   };
+
+  // Remove manual slash commands - using YooptaRichEditor for both modes
+
+  // Remove manual element insertion - using YooptaRichEditor for both modes
+
+  // Remove manual key handling - using YooptaRichEditor for both modes
 
   const handleSubmit = () => {
     console.log('🔍 Form state at submit:');
@@ -157,8 +167,14 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
             <Label htmlFor="content" className="text-left mb-1">
               Snippet Content
             </Label>
+            
+            {/* UNIFIED EDITOR APPROACH - Always use YooptaRichEditor */}
             <YooptaRichEditor
-              initialHtml={snippetToEdit?.html || initialHtml || undefined}
+              initialHtml={
+                snippetToEdit?.html || 
+                initialHtml || 
+                (snippetToEdit?.text ? `<p>${snippetToEdit.text.replace(/\n/g, '</p><p>')}</p>` : undefined)
+              }
               onChange={handleEditorChange}
               placeholder="Enter your snippet content here... Use / to access formatting options."
               className="min-h-[120px]"

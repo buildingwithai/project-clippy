@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import YooptaEditor, { createYooptaEditor, YooptaContentValue } from '@yoopta/editor';
 
 // Core plugins
@@ -37,6 +37,7 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
   const [editorValue, setEditorValue] = useState<YooptaContentValue>();
   
   // Track if we're in initialization phase to prevent onChange from overwriting content
+  const isInitializingRef = useRef(true);
   const [isInitializing, setIsInitializing] = useState(true);
 
   // Configure plugins
@@ -135,7 +136,7 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
     },
   }), []);
 
-  // Convert HTML to Yoopta format for initialization - SIMPLIFIED
+  // Convert HTML to Yoopta format for initialization - SIMPLIFIED FOR TESTING
   const convertHtmlToYoopta = useCallback((html: string): YooptaContentValue => {
     console.log('🔧 Converting HTML to Yoopta:', html);
     
@@ -144,41 +145,27 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
       return {};
     }
 
-    // SIMPLE approach: Just extract text and create basic paragraphs
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = html;
-    const textContent = tempDiv.textContent || tempDiv.innerText || '';
-    
-    if (!textContent.trim()) {
-      console.log('🔧 No text content found');
-      return {};
-    }
-
-    // Split by lines and create paragraph blocks
-    const lines = textContent.split('\n').filter(line => line.trim());
+    // TEST: Simple block creation (without forced remounting)
+    console.log('🧪 Creating simple test block without key prop interference');
     const result: YooptaContentValue = {};
+    const blockId = generateId();
     
-    lines.forEach((line, index) => {
-      const blockId = generateId();
-      result[blockId] = {
-        id: blockId,
-        type: 'paragraph',
-        value: [
-          {
-            id: generateId(),
-            type: 'paragraph',
-            children: [{ text: line.trim() }],
-            props: {
-              nodeType: 'block',
-            },
-          },
-        ],
-        meta: {
-          order: index,
-          depth: 0,
-        },
-      };
-    });
+    result[blockId] = {
+      id: blockId,
+      type: 'Paragraph',
+      value: [
+        {
+          id: generateId(),
+          type: 'paragraph',
+          children: [{ text: 'TEST: Content without remounting' }]
+        }
+      ],
+      meta: {
+        align: 'left',
+        depth: 0,
+        order: 0
+      }
+    };
 
     console.log('🔧 Converted result:', result);
     return result;
@@ -260,6 +247,7 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
     console.log('Current editorValue:', editorValue);
     
     // Reset initialization flag when we get new content
+    isInitializingRef.current = true;
     setIsInitializing(true);
     console.log('🔄 Reset initialization flag due to new props');
     
@@ -271,6 +259,7 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
       console.log('⏳ Setting up empty editor for new content');
       // For completely new content, set up a minimal initialization timer
       setTimeout(() => {
+        isInitializingRef.current = false;
         setIsInitializing(false);
         console.log('🎯 Enabling onChange for new content creation');
       }, 50);
@@ -299,15 +288,18 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
         const newKeys = Object.keys(yooptaValue).sort().join(',');
         
         if (currentKeys !== newKeys || !editorValue) {
+          console.log('🔄 Setting editor value directly (no remounting):', yooptaValue);
           setEditorValue(yooptaValue);
           console.log('✅ Editor value updated successfully');
-          // Set initialization flag to false after a brief delay to allow editor to settle
+          // Simple delay for initialization
           setTimeout(() => {
+            isInitializingRef.current = false;
             setIsInitializing(false);
             console.log('🎯 Initialization complete - onChange events now enabled');
           }, 100);
         } else {
           console.log('📋 Editor value unchanged - skipping update');
+          isInitializingRef.current = false;
           setIsInitializing(false);
         }
       } catch (error) {
@@ -337,6 +329,7 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
         setEditorValue(emptyParagraph);
         console.log('🔄 Fallback to empty editor due to error');
         setTimeout(() => {
+          isInitializingRef.current = false;
           setIsInitializing(false);
           console.log('🎯 Error fallback initialization complete');
         }, 100);
@@ -368,6 +361,7 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
       setEditorValue(emptyParagraph);
       console.log('✅ Empty editor value set');
       setTimeout(() => {
+        isInitializingRef.current = false;
         setIsInitializing(false);
         console.log('🎯 Empty editor initialization complete');
       }, 100);
@@ -377,8 +371,18 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
 
   // Handle content changes
   const handleChange = useCallback((newValue: YooptaContentValue) => {
+    console.log('🔧 YooptaEditor onChange - isInitializingRef:', isInitializingRef.current);
+    console.log('🔧 YooptaEditor onChange - isInitializing state:', isInitializing);
     console.log('🔧 YooptaEditor onChange - raw value:', newValue);
     console.log('🔧 YooptaEditor onChange - block types:', Object.values(newValue).map((block: any) => block.type));
+    console.log('🔧 YooptaEditor onChange - full block structure:', JSON.stringify(newValue, null, 2));
+    
+    // Don't update if we're still initializing (use ref for immediate access)
+    if (isInitializingRef.current) {
+      console.log('🚫 Ignoring onChange during initialization');
+      return;
+    }
+    
     setEditorValue(newValue);
 
     if (onChange) {
@@ -386,7 +390,11 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
       console.log('🔧 YooptaEditor onChange - converted output:', output);
       onChange(output);
     }
-  }, [onChange, convertYooptaToOutput]);
+  }, [onChange, convertYooptaToOutput, isInitializing]);
+
+  // Debug: Log what we're passing to YooptaEditor
+  console.log('🔍 YooptaEditor render - editorValue:', editorValue);
+  console.log('🔍 YooptaEditor render - editorValue keys:', editorValue ? Object.keys(editorValue) : 'undefined');
 
   return (
     <div className={`yoopta-rich-editor border border-slate-700 rounded-md overflow-hidden ${className}`}>
@@ -451,26 +459,27 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
             background: #334155;
           }
           
-          /* Action Menu - Force black text on white background */
+          /* Action Menu - Dark theme to match extension */
           [data-yoopta-action-menu-list],
           [data-action-menu-list],
           .yoopta-action-menu,
           [class*="action-menu"],
           [class*="ActionMenu"] {
-            background: #ffffff !important;
-            border: 1px solid #e5e7eb !important;
+            background: #1e293b !important;
+            border: 1px solid #334155 !important;
             border-radius: 8px !important;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2) !important;
-            color: #000000 !important;
+            color: #ffffff !important;
+            max-width: 180px !important;
           }
           
-          /* All text in action menu should be black */
+          /* All text in action menu should be white */
           [data-yoopta-action-menu-list] *,
           [data-action-menu-list] *,
           .yoopta-action-menu *,
           [class*="action-menu"] *,
           [class*="ActionMenu"] * {
-            color: #000000 !important;
+            color: #ffffff !important;
           }
           
           /* Action menu items */
@@ -481,11 +490,12 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
           .yoopta-action-menu-item,
           [class*="action-menu-item"],
           [class*="ActionMenuItem"] {
-            color: #000000 !important;
+            color: #ffffff !important;
             background: transparent !important;
-            padding: 8px 12px !important;
+            padding: 6px 8px !important;
             cursor: pointer !important;
             transition: background-color 0.2s !important;
+            font-size: 12px !important;
           }
           
           /* Hover states */
@@ -496,8 +506,8 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
           .yoopta-action-menu-item:hover,
           [class*="action-menu-item"]:hover,
           [class*="ActionMenuItem"]:hover {
-            background: #f3f4f6 !important;
-            color: #000000 !important;
+            background: #334155 !important;
+            color: #ffffff !important;
           }
           
           /* Target any text elements specifically */
@@ -512,7 +522,15 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
           [data-yoopta-action-menu-list] strong,
           [data-yoopta-action-menu-list] em,
           [data-yoopta-action-menu-list] small {
-            color: #000000 !important;
+            color: #ffffff !important;
+            font-size: 12px !important;
+          }
+          
+          /* Description text */
+          [data-yoopta-action-menu-list] .description,
+          [data-yoopta-action-menu-list] small {
+            color: #94a3b8 !important;
+            font-size: 11px !important;
           }
         `
       }} />
