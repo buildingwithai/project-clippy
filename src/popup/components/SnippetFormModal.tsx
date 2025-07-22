@@ -39,11 +39,12 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
   const [text, setText] = useState('');
   const [html, setHtml] = useState<string | undefined>(undefined);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [useSimpleEditor, setUseSimpleEditor] = useState(false);
   
   // Remove manual slash command state - using YooptaRichEditor for both modes
 
   useEffect(() => {
-    console.log('SnippetFormModal useEffect - snippetToEdit:', snippetToEdit, 'initialText:', initialText, 'initialHtml:', initialHtml, 'isOpen:', isOpen); // Debug log
+    console.log('[Clippy] SnippetFormModal useEffect - snippetToEdit:', snippetToEdit?.id, 'initialText:', initialText?.substring(0, 50) + '...', 'initialHtml:', initialHtml ? 'Yes' : 'No', 'isOpen:', isOpen);
     
     if (isOpen && snippetToEdit) {
       console.log('Setting snippet to edit - text:', snippetToEdit.text, 'html:', snippetToEdit.html); // Debug log
@@ -53,11 +54,13 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
       setSelectedFolderId(snippetToEdit.folderId || null); // folderId is optional in Snippet, maps to null for modal state
     } else if (isOpen && initialText) {
       // Creating new snippet with pre-populated text (e.g., from context menu)
-      console.log('Setting initial text:', initialText, 'initialHtml:', initialHtml); // Debug log
+      console.log('[Clippy] SnippetFormModal - Setting initial text:', initialText.substring(0, 100) + '...', 'initialHtml length:', initialHtml?.length || 0);
       setTitle('');
       setText(initialText);
       setHtml(initialHtml || '');
       setSelectedFolderId(null);
+      // For debugging, start with simple editor when we have initial text
+      setUseSimpleEditor(true);
     } else if (isOpen) {
       // Reset form for new snippet without initial text
       console.log('Resetting form for new snippet'); // Debug log
@@ -65,6 +68,7 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
       setText('');
       setHtml('');
       setSelectedFolderId(null);
+      setUseSimpleEditor(false);
     }
   }, [snippetToEdit, initialText, initialHtml, isOpen]); // Re-run effect if isOpen changes to reset form when re-opened for new snippet
 
@@ -168,17 +172,56 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
               Snippet Content
             </Label>
             
-            {/* UNIFIED EDITOR APPROACH - Always use YooptaRichEditor */}
-            <YooptaRichEditor
-              initialHtml={
-                snippetToEdit?.html || 
-                initialHtml || 
-                (snippetToEdit?.text ? `<p>${snippetToEdit.text.replace(/\n/g, '</p><p>')}</p>` : undefined)
-              }
-              onChange={handleEditorChange}
-              placeholder="Enter your snippet content here... Use / to access formatting options."
-              className="min-h-[120px]"
-            />
+            {/* Debugging: Add toggle to use simple editor */}
+            <div className="flex items-center gap-2 mb-2">
+              <button
+                type="button"
+                onClick={() => setUseSimpleEditor(!useSimpleEditor)}
+                className="text-xs text-slate-400 hover:text-slate-200"
+              >
+                {useSimpleEditor ? 'Use Rich Editor' : 'Use Simple Editor'}
+              </button>
+            </div>
+
+            {useSimpleEditor ? (
+              <textarea
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  setHtml(undefined); // Clear HTML when using simple editor
+                }}
+                placeholder="Enter your snippet content here..."
+                className="w-full min-h-[120px] p-3 bg-slate-800 border border-slate-700 rounded-md text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-sky-500 focus:border-transparent resize-none"
+              />
+            ) : (
+              <YooptaRichEditor
+                key={`editor-${snippetToEdit?.id || 'new'}-${initialText || initialHtml || 'empty'}`}
+                initialHtml={(() => {
+                  // Priority order: existing snippet HTML > captured HTML > captured text > existing snippet text
+                  if (snippetToEdit?.html) {
+                    console.log('[Clippy] Modal - Using snippetToEdit.html');
+                    return snippetToEdit.html;
+                  }
+                  if (initialHtml) {
+                    console.log('[Clippy] Modal - Using initialHtml');
+                    return initialHtml;
+                  }
+                  if (initialText) {
+                    console.log('[Clippy] Modal - Converting initialText to HTML:', initialText.substring(0, 50) + '...');
+                    return `<p>${initialText.replace(/\n/g, '</p><p>')}</p>`;
+                  }
+                  if (snippetToEdit?.text) {
+                    console.log('[Clippy] Modal - Converting snippetToEdit.text to HTML');
+                    return `<p>${snippetToEdit.text.replace(/\n/g, '</p><p>')}</p>`;
+                  }
+                  console.log('[Clippy] Modal - No content to initialize with');
+                  return undefined;
+                })()}
+                onChange={handleEditorChange}
+                placeholder="Enter your snippet content here... Use / to access formatting options."
+                className="min-h-[120px]"
+              />
+            )}
           </div>
         </div>
         <DialogFooter className="mt-4">

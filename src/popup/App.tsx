@@ -286,9 +286,13 @@ const App: React.FC = () => {
       setFolders(loadedFolders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
 
       if (result.pendingSnippetText) {
-        console.log('Pending snippet text found, opening new snippet modal:', result.pendingSnippetText);
+        console.log('[Clippy] Popup - Pending snippet text found:', result.pendingSnippetText?.substring(0, 100) + '...');
+        console.log('[Clippy] Popup - Pending snippet HTML found:', result.pendingSnippetHtml ? 'Yes' : 'No');
         handleOpenNewSnippetModalWithText(result.pendingSnippetText, result.pendingSnippetHtml); 
         await chrome.storage.local.remove(['pendingSnippetText', 'pendingSnippetHtml']);
+        console.log('[Clippy] Popup - Pending data cleared and modal opened');
+      } else {
+        console.log('[Clippy] Popup - No pending snippet text found');
       }
       setError(null);
     } catch (e) {

@@ -136,7 +136,7 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
     },
   }), []);
 
-  // Convert HTML to Yoopta format for initialization - SIMPLIFIED FOR TESTING
+  // Convert HTML to Yoopta format for initialization
   const convertHtmlToYoopta = useCallback((html: string): YooptaContentValue => {
     console.log('🔧 Converting HTML to Yoopta:', html);
     
@@ -145,8 +145,19 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
       return {};
     }
 
-    // TEST: Simple block creation (without forced remounting)
-    console.log('🧪 Creating simple test block without key prop interference');
+    // Extract text content from HTML
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+    const textContent = tempDiv.textContent || tempDiv.innerText || '';
+    
+    console.log('🔧 Extracted text content:', textContent);
+    
+    if (!textContent.trim()) {
+      console.log('🔧 No text content found, returning empty');
+      return {};
+    }
+
+    // Create a simple paragraph block with the extracted text
     const result: YooptaContentValue = {};
     const blockId = generateId();
     
@@ -157,7 +168,7 @@ export const YooptaRichEditor: React.FC<YooptaRichEditorProps> = ({
         {
           id: generateId(),
           type: 'paragraph',
-          children: [{ text: 'TEST: Content without remounting' }]
+          children: [{ text: textContent }]
         }
       ],
       meta: {

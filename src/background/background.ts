@@ -125,7 +125,7 @@ function initializeContextMenus() {
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'saveSnippet') {
     if (info.selectionText && tab?.id) {
-      console.log('Selected text to save via context menu:', info.selectionText);
+      console.log('[Clippy] Context menu - Selected text to save:', info.selectionText);
       
       // Get HTML content from the selection
       try {
@@ -364,23 +364,30 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         
         const selectionData = results[0]?.result;
         if (selectionData) {
+          console.log('[Clippy] Successfully captured selection data:', {
+            plainText: selectionData.plainText?.substring(0, 100) + '...',
+            htmlLength: selectionData.html?.length || 0
+          });
           await chrome.storage.local.set({ 
             pendingSnippetText: selectionData.plainText,
             pendingSnippetHtml: selectionData.html
           });
         } else {
+          console.log('[Clippy] No selection data from script, using fallback text');
           // Fallback to plain text if script execution fails
           await chrome.storage.local.set({ pendingSnippetText: info.selectionText });
         }
       } catch (error) {
-        console.warn('Failed to get HTML selection, falling back to plain text:', error);
+        console.warn('[Clippy] Failed to get HTML selection, falling back to plain text:', error);
         await chrome.storage.local.set({ pendingSnippetText: info.selectionText });
       }
       
+      console.log('[Clippy] Attempting to open popup with pending text...');
       try {
         await chrome.action.openPopup();
+        console.log('[Clippy] Popup opened successfully via chrome.action.openPopup()');
       } catch (e: unknown) {
-        console.warn("chrome.action.openPopup() failed, attempting to open popup.html in a new tab.", e);
+        console.warn("[Clippy] chrome.action.openPopup() failed, attempting to open popup.html in a new tab.", e);
         chrome.tabs.create({ url: chrome.runtime.getURL('src/popup/index.html') });
       }
     }
