@@ -393,15 +393,45 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
   } else if (typeof info.menuItemId === 'string' && info.menuItemId.startsWith('paste-snippet-')) {
     const snippetIdToPaste = info.menuItemId.replace('paste-snippet-', '');
+    console.log('[Clippy] Context menu paste - Looking for snippet ID:', snippetIdToPaste);
+    
     chrome.storage.local.get({ snippets: [] }, (result) => {
       const snippets: Snippet[] = result.snippets as Snippet[];
       const snippet = snippets.find((s) => s.id === snippetIdToPaste);
+      console.log('[Clippy] Context menu paste - Found snippet:', snippet?.title || snippet?.text?.substring(0, 50));
+      
       if (snippet && tab?.id) {
+        console.log('[Clippy] Context menu paste - Executing script on tab:', tab.id);
         chrome.scripting.executeScript({
           target: { tabId: tab.id, allFrames: true },
-          func: pasteContentInActiveElement,
+          func: pasteContentInActiveElementWithDebug,
           args: [snippet.text, snippet.html],
-        }).catch(err => console.error('Error executing script:', err));
+        }).then((results) => {
+          console.log('[Clippy] Context menu paste - Script executed successfully:', results);
+          
+          // Check if any frame actually had an active element and attempted pasting
+          const activeFrames = results.filter(result => result.result !== undefined);
+          const successfulFrames = results.filter(result => result.result === true);
+          
+          console.log('[Clippy] Context menu paste - Frames with active elements:', activeFrames.length);
+          console.log('[Clippy] Context menu paste - Successful paste attempts:', successfulFrames.length);
+          
+          // Priority: main frame (frameId 0) success is most important
+          const mainFrame = results.find(result => result.frameId === 0);
+          const mainFrameSuccess = mainFrame?.result === true;
+          
+          console.log('[Clippy] Context menu paste - Main frame success:', mainFrameSuccess);
+          
+          if (successfulFrames.length === 0 && activeFrames.length === 0) {
+            console.warn('[Clippy] Context menu paste - No frames had active elements to paste into');
+          } else if (!mainFrameSuccess && successfulFrames.length > 0) {
+            console.warn('[Clippy] Context menu paste - Success in sub-frames but not main frame. User may not see pasted content.');
+          }
+        }).catch(err => {
+          console.error('[Clippy] Context menu paste - Error executing script:', err);
+        });
+      } else {
+        console.error('[Clippy] Context menu paste - No snippet found or no tab ID');
       }
     });
   } else if (info.menuItemId === 'open-clippy-to-see-all') {
@@ -414,6 +444,185 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
+// Enhanced version with smart element detection and detailed debugging
+function pasteContentInActiveElementWithDebug(textToPaste: string, htmlToPaste?: string) {
+  console.log('[Clippy] Frame starting paste attempt for text:', textToPaste?.substring(0, 50) + '...');
+  
+  // Smart element detection - find the best target element
+  function findBestTarget(): HTMLElement | null {
+    const candidates: HTMLElement[] = [];
+    
+    // Start with the active element
+    if (document.activeElement && document.activeElement !== document.body && document.activeElement !== document.documentElement) {
+      candidates.push(document.activeElement as HTMLElement);
+    }
+    
+    // Add all visible, editable elements
+    const editableElements = document.querySelectorAll(`
+      input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([disabled]), 
+      textarea:not([disabled]), 
+      [contenteditable="true"], 
+      [role="textbox"]
+    `);
+    
+    editableElements.forEach(el => {
+      const htmlEl = el as HTMLElement;
+      const rect = htmlEl.getBoundingClientRect();
+      
+      // Only consider visible elements
+      if (rect.width > 0 && rect.height > 0 && 
+          rect.top >= 0 && rect.left >= 0 &&
+          rect.bottom <= window.innerHeight && rect.right <= window.innerWidth) {
+        candidates.push(htmlEl);
+      }
+    });
+    
+    // Score each candidate
+    let bestScore = -1;
+    let bestElement: HTMLElement | null = null;
+    
+    for (const element of candidates) {
+      let score = 0;
+      const rect = element.getBoundingClientRect();
+      
+      // Skip our own notification elements
+      if (element.style?.position === 'fixed' && element.style?.zIndex === '999999') {
+        continue;
+      }
+      
+      // Active element gets huge bonus
+      if (element === document.activeElement) {
+        score += 1000;
+      }
+      
+      // Visible elements get points
+      if (rect.width > 0 && rect.height > 0) {
+        score += 100;
+      }
+      
+      // Elements with focus indicators (cursor visible) get bonus
+      if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+        if (typeof element.selectionStart === 'number') {
+          score += 50;
+        }
+      }
+      
+      // Larger elements get slight preference (likely main content areas)
+      score += Math.min(20, (rect.width * rect.height) / 1000);
+      
+      // Prefer text inputs and textareas
+      if (element instanceof HTMLTextAreaElement) score += 30;
+      if (element instanceof HTMLInputElement && element.type === 'text') score += 25;
+      if (element.isContentEditable) score += 20;
+      
+      console.log('[Clippy] Element candidate:', {
+        tagName: element.tagName,
+        type: (element as HTMLInputElement).type || 'n/a',
+        id: element.id || 'no-id',
+        className: element.className || 'no-class',
+        placeholder: (element as HTMLInputElement).placeholder || 'no-placeholder',
+        isActive: element === document.activeElement,
+        visible: rect.width > 0 && rect.height > 0,
+        score: score,
+        rect: { width: rect.width, height: rect.height, top: rect.top, left: rect.left }
+      });
+      
+      if (score > bestScore) {
+        bestScore = score;
+        bestElement = element;
+      }
+    }
+    
+    return bestElement;
+  }
+  
+  const activeElement = findBestTarget();
+  
+  if (!activeElement) {
+    console.log('[Clippy] Frame has no suitable paste target, skipping');
+    return false;
+  }
+  
+  console.log('[Clippy] Frame selected target element:', {
+    tagName: activeElement.tagName,
+    type: (activeElement as HTMLInputElement).type || 'n/a',
+    id: activeElement.id || 'no-id',
+    className: activeElement.className || 'no-class',
+    placeholder: (activeElement as HTMLInputElement).placeholder || 'no-placeholder',
+    currentValue: (activeElement as HTMLInputElement).value?.substring(0, 50) + '...' || 'no-value',
+    isVisible: activeElement.offsetWidth > 0 && activeElement.offsetHeight > 0,
+    isFocused: activeElement === document.activeElement
+  });
+  
+  // Enhanced ultra simple method with proper cursor positioning
+  function trySmartPaste(): boolean {
+    if (!activeElement) return false;
+    
+    try {
+      // For input/textarea elements
+      if ('value' in activeElement && typeof (activeElement as HTMLInputElement).value === 'string') {
+        const input = activeElement as HTMLInputElement | HTMLTextAreaElement;
+        
+        // Get cursor position
+        const start = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+        const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : input.value.length;
+        
+        console.log('[Clippy] Input element paste - cursor at:', start, 'to', end);
+        
+        // Insert at cursor position
+        const beforeCursor = input.value.substring(0, start);
+        const afterCursor = input.value.substring(end);
+        input.value = beforeCursor + textToPaste + afterCursor;
+        
+        // Position cursor after inserted text
+        const newPos = start + textToPaste.length;
+        input.selectionStart = newPos;
+        input.selectionEnd = newPos;
+        
+        // Trigger events
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        
+        console.log('[Clippy] Successfully pasted into input at cursor position');
+        return true;
+      }
+      
+      // For contentEditable elements
+      if (activeElement.isContentEditable || activeElement.getAttribute('contenteditable') === 'true') {
+        activeElement.focus();
+        
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          range.deleteContents();
+          range.insertNode(document.createTextNode(textToPaste));
+          range.collapse(false);
+          
+          console.log('[Clippy] Successfully pasted into contentEditable at cursor');
+          return true;
+        } else {
+          // Fallback: append to end
+          activeElement.textContent = (activeElement.textContent || '') + textToPaste;
+          console.log('[Clippy] Pasted to end of contentEditable (no selection)');
+          return true;
+        }
+      }
+      
+      console.log('[Clippy] Element type not supported for pasting');
+      return false;
+      
+    } catch (error) {
+      console.error('[Clippy] Smart paste method failed:', error);
+      return false;
+    }
+  }
+  
+  const success = trySmartPaste();
+  console.log('[Clippy] Frame paste result:', success);
+  return success;
+}
+
+// Keep the original function for backward compatibility  
 function pasteContentInActiveElement(textToPaste: string, htmlToPaste?: string) {
   const activeElement = document.activeElement as HTMLInputElement | HTMLTextAreaElement | HTMLElement;
   
