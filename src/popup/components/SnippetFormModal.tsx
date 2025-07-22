@@ -126,11 +126,11 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
     <Dialog open={isOpen} onOpenChange={handleModalOpenChange}>
       <DialogContent className="sm:max-w-[425px] bg-slate-900 border-slate-700 text-slate-50 overflow-y-auto max-h-[90vh]">
         <DialogHeader>
-          <DialogTitle className="text-sky-400">
-            {snippetToEdit ? 'Edit Snippet' : 'Create New Snippet'}
+          <DialogTitle className="text-slate-100 text-lg font-semibold">
+            {snippetToEdit ? 'Edit Snippet' : 'Add a Snippet'}
           </DialogTitle>
           <DialogDescription className="text-sm text-slate-400 mt-1 mb-2">
-            {snippetToEdit ? 'Edit your snippet details.' : 'Create a new snippet. Add a title, paste your code, and optionally select a folder.'}
+            {snippetToEdit ? 'Edit your snippet details.' : 'Give it a name, paste your content, and choose a folder.'}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 py-2">
@@ -168,19 +168,22 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
             </Select>
           </div>
           <div className="grid grid-cols-1 items-start gap-2">
-            <Label htmlFor="content" className="text-left mb-1">
-              Snippet Content
-            </Label>
-            
-            {/* Debugging: Add toggle to use simple editor */}
-            <div className="flex items-center gap-2 mb-2">
-              <button
-                type="button"
-                onClick={() => setUseSimpleEditor(!useSimpleEditor)}
-                className="text-xs text-slate-400 hover:text-slate-200"
-              >
-                {useSimpleEditor ? 'Use Rich Editor' : 'Use Simple Editor'}
-              </button>
+            <div className="space-y-1">
+              <Label htmlFor="content" className="text-left text-slate-100 font-medium">
+                Write or Paste Here
+              </Label>
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <span>💡 Tip: Use '/' to open the command menu for headings, lists, code blocks, and more.</span>
+              </div>
+              <div className="flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={() => setUseSimpleEditor(!useSimpleEditor)}
+                  className="text-xs text-slate-400 hover:text-slate-200"
+                >
+                  {useSimpleEditor ? 'Use Rich Editor' : 'Use Plain-Text Editor'}
+                </button>
+              </div>
             </div>
 
             {useSimpleEditor ? (
