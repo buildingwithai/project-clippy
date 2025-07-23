@@ -2,7 +2,7 @@
  * Background service worker for Project Clippy.
  * Handles context menu creation and other background tasks.
  */
-import type { Snippet } from '@/utils/types';
+import type { Snippet, Folder } from '@/utils/types';
 
 import { runMigrations } from './migration';
 
@@ -441,11 +441,44 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       console.warn("chrome.action.openPopup() failed, attempting to open popup.html in a new tab.", e);
       chrome.tabs.create({ url: chrome.runtime.getURL('src/popup/index.html') });
     }
+  } else if (typeof info.menuItemId === 'string' && info.menuItemId.startsWith('folder-more-')) {
+    // Handle "More..." click for specific folder
+    const folderId = info.menuItemId.replace('folder-more-', '');
+    console.log('[Clippy] Opening popup for folder:', folderId);
+    
+    // Store the folder filter in local storage so the popup can read it
+    await chrome.storage.local.set({ 
+      pendingFolderFilter: folderId,
+      pendingFolderFilterTimestamp: Date.now()
+    });
+    
+    try {
+      await chrome.action.openPopup();
+    } catch (e: unknown) {
+      console.warn("chrome.action.openPopup() failed, attempting to open popup.html in a new tab.", e);
+      chrome.tabs.create({ url: chrome.runtime.getURL('src/popup/index.html') });
+    }
+  } else if (info.menuItemId === 'uncategorized-more') {
+    // Handle "More..." click for uncategorized snippets
+    console.log('[Clippy] Opening popup for uncategorized snippets');
+    
+    // Store the uncategorized filter in local storage
+    await chrome.storage.local.set({ 
+      pendingFolderFilter: 'uncategorized',
+      pendingFolderFilterTimestamp: Date.now()
+    });
+    
+    try {
+      await chrome.action.openPopup();
+    } catch (e: unknown) {
+      console.warn("chrome.action.openPopup() failed, attempting to open popup.html in a new tab.", e);
+      chrome.tabs.create({ url: chrome.runtime.getURL('src/popup/index.html') });
+    }
   }
 });
 
 // Enhanced version with smart element detection and detailed debugging
-function pasteContentInActiveElementWithDebug(textToPaste: string, htmlToPaste?: string) {
+function pasteContentInActiveElementWithDebug(textToPaste: string, _htmlToPaste?: string) {
   console.log('[Clippy] Frame starting paste attempt for text:', textToPaste?.substring(0, 50) + '...');
   
   // Smart element detection - find the best target element
@@ -709,7 +742,7 @@ function pasteContentInActiveElement(textToPaste: string, htmlToPaste?: string) 
   }
   
   // Helper function to convert HTML to RTF (simplified)
-  function convertHtmlToRtf(html: string, plainText: string): string {
+  function convertHtmlToRtf(html: string, _plainText: string): string {
     try {
       let rtf = '{\\rtf1\\ansi\\deff0 {\\fonttbl {\\f0 Times New Roman;}}\\f0\\fs24 ';
       
@@ -971,10 +1004,10 @@ function pasteContentInActiveElement(textToPaste: string, htmlToPaste?: string) 
   console.warn('All paste methods failed, content may not have been inserted correctly');
 }
 
-// Legacy function for backward compatibility
-function pasteTextInActiveElement(textToPaste: string) {
-  return pasteContentInActiveElement(textToPaste);
-}
+// Legacy function for backward compatibility (currently unused)
+// function pasteTextInActiveElement(textToPaste: string) {
+//   return pasteContentInActiveElement(textToPaste);
+// }
 
 async function updatePasteContextMenu() {
   // 1. Remove the main parent item. This removes all its children.
@@ -1003,13 +1036,19 @@ async function updatePasteContextMenu() {
 
 // Renamed and slightly adjusted function to populate items
 function populatePasteSubmenuItems() {
-  chrome.storage.local.get({ snippets: [] }, (result) => {
+  chrome.storage.local.get({ 
+    snippets: [], 
+    folders: [], 
+    contextMenuMode: 'hybrid' 
+  }, (result) => {
     const snippets: Snippet[] = result.snippets as Snippet[];
+    const folders = result.folders || [];
+    const contextMenuMode = result.contextMenuMode || 'hybrid';
     
     if (snippets.length === 0) {
       chrome.contextMenus.create({
         id: 'noSnippetsToPaste',
-        parentId: 'pasteSnippetParent', // Parent is the newly created one
+        parentId: 'pasteSnippetParent',
         title: '(No snippets saved yet)',
         contexts: ['editable'],
         enabled: false,
@@ -1017,20 +1056,121 @@ function populatePasteSubmenuItems() {
       return;
     }
 
-    // No need to create 'pasteSnippetParentChildren' group anymore, 
-    // as we are rebuilding under the main 'pasteSnippetParent'.
+    switch (contextMenuMode) {
+      case 'pinned':
+        populatePinnedOnlyMenu(snippets);
+        break;
+      case 'folders':
+        populateFoldersOnlyMenu(snippets, folders);
+        break;
+      case 'hybrid':
+      default:
+        populateHybridMenu(snippets, folders);
+        break;
+    }
+  });
+}
 
-    const recentSnippets = snippets.slice(0, 10);
+// Show only pinned snippets
+function populatePinnedOnlyMenu(snippets: Snippet[]) {
+  const pinnedSnippets = snippets.filter(s => s.isPinned).slice(0, 6);
+  
+  if (pinnedSnippets.length === 0) {
+    chrome.contextMenus.create({
+      id: 'noPinnedSnippets',
+      parentId: 'pasteSnippetParent',
+      title: '(No pinned snippets)',
+      contexts: ['editable'],
+      enabled: false,
+    });
+    return;
+  }
+
+  pinnedSnippets.forEach((snippet) => {
+    chrome.contextMenus.create({
+      id: `paste-snippet-${snippet.id}`,
+      parentId: 'pasteSnippetParent',
+      title: truncateTitle(snippet),
+      contexts: ['editable'],
+    });
+  });
+}
+
+// Show only folder submenus
+function populateFoldersOnlyMenu(snippets: Snippet[], folders: Folder[]) {
+  if (folders.length === 0) {
+    // Show uncategorized snippets if no folders exist
+    const uncategorizedSnippets = snippets.filter(s => !s.folderId).slice(0, 6);
+    uncategorizedSnippets.forEach((snippet) => {
+      chrome.contextMenus.create({
+        id: `paste-snippet-${snippet.id}`,
+        parentId: 'pasteSnippetParent',
+        title: truncateTitle(snippet),
+        contexts: ['editable'],
+      });
+    });
+    return;
+  }
+
+  folders.forEach((folder) => {
+    createFolderSubmenu(folder, snippets);
+  });
+
+  // Add uncategorized snippets if any exist
+  const uncategorizedSnippets = snippets.filter(s => !s.folderId);
+  if (uncategorizedSnippets.length > 0) {
+    createUncategorizedSubmenu(uncategorizedSnippets);
+  }
+}
+
+// Show pinned snippets first, then folder submenus (hybrid mode)
+function populateHybridMenu(snippets: Snippet[], folders: Folder[]) {
+  const pinnedSnippets = snippets.filter(s => s.isPinned).slice(0, 2);
+  
+  // Add pinned snippets at top
+  pinnedSnippets.forEach((snippet) => {
+    chrome.contextMenus.create({
+      id: `paste-snippet-${snippet.id}`,
+      parentId: 'pasteSnippetParent',
+      title: `⭐ ${truncateTitle(snippet)}`,
+      contexts: ['editable'],
+    });
+  });
+
+  // Add separator if we have both pinned snippets and folders
+  if (pinnedSnippets.length > 0 && (folders.length > 0 || snippets.some(s => !s.folderId))) {
+    chrome.contextMenus.create({
+      id: 'pinned-separator',
+      parentId: 'pasteSnippetParent',
+      type: 'separator',
+      contexts: ['editable'],
+    });
+  }
+
+  // Add folder submenus
+  folders.forEach((folder) => {
+    createFolderSubmenu(folder, snippets);
+  });
+
+  // Add uncategorized snippets if any exist
+  const uncategorizedSnippets = snippets.filter(s => !s.folderId && !s.isPinned);
+  if (uncategorizedSnippets.length > 0) {
+    createUncategorizedSubmenu(uncategorizedSnippets);
+  }
+
+  // If no pinned snippets and no folders, fall back to recent snippets
+  if (pinnedSnippets.length === 0 && folders.length === 0) {
+    const recentSnippets = snippets.slice(0, 6);
     recentSnippets.forEach((snippet) => {
       chrome.contextMenus.create({
         id: `paste-snippet-${snippet.id}`,
         parentId: 'pasteSnippetParent',
-        title: snippet.title ? (snippet.title.length > 30 ? snippet.title.substring(0,27) + "..." : snippet.title) : (snippet.text.length > 30 ? snippet.text.substring(0, 27) + "..." : snippet.text),
+        title: truncateTitle(snippet),
         contexts: ['editable'],
       });
     });
 
-    if (snippets.length > 10) {
+    if (snippets.length > 6) {
       chrome.contextMenus.create({
         id: 'paste-separator-more',
         parentId: 'pasteSnippetParent',
@@ -1038,13 +1178,117 @@ function populatePasteSubmenuItems() {
         contexts: ['editable'],
       });
       chrome.contextMenus.create({
-        id: 'open-clippy-to-see-all', // Handled by the main onClicked listener
+        id: 'open-clippy-to-see-all',
         parentId: 'pasteSnippetParent',
         title: 'More... (Open Clippy)',
         contexts: ['editable'],
       });
     }
+  }
+}
+
+// Helper function to create folder submenu
+function createFolderSubmenu(folder: Folder, snippets: Snippet[]) {
+  const folderSnippets = snippets.filter(s => s.folderId === folder.id);
+  
+  if (folderSnippets.length === 0) return;
+
+  // Create folder submenu
+  chrome.contextMenus.create({
+    id: `folder-${folder.id}`,
+    parentId: 'pasteSnippetParent',
+    title: `${folder.emoji} ${folder.name}`,
+    contexts: ['editable'],
   });
+
+  // Sort folder snippets: pinned first, then by lastUsed or alphabetical
+  const sortedSnippets = folderSnippets.sort((a, b) => {
+    // Pinned snippets first
+    if (a.isPinned && !b.isPinned) return -1;
+    if (!a.isPinned && b.isPinned) return 1;
+    
+    // Then by lastUsed (most recent first)
+    if (a.lastUsed && b.lastUsed) {
+      return new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime();
+    }
+    if (a.lastUsed && !b.lastUsed) return -1;
+    if (!a.lastUsed && b.lastUsed) return 1;
+    
+    // Finally alphabetical by title/text
+    const aTitle = a.title || a.text;
+    const bTitle = b.title || b.text;
+    return aTitle.localeCompare(bTitle);
+  });
+
+  // Add up to 6 snippets
+  const displaySnippets = sortedSnippets.slice(0, 6);
+  displaySnippets.forEach((snippet) => {
+    chrome.contextMenus.create({
+      id: `paste-snippet-${snippet.id}`,
+      parentId: `folder-${folder.id}`,
+      title: snippet.isPinned ? `⭐ ${truncateTitle(snippet)}` : truncateTitle(snippet),
+      contexts: ['editable'],
+    });
+  });
+
+  // Add "More..." if folder has more than 6 snippets
+  if (sortedSnippets.length > 6) {
+    chrome.contextMenus.create({
+      id: `folder-separator-${folder.id}`,
+      parentId: `folder-${folder.id}`,
+      type: 'separator',
+      contexts: ['editable'],
+    });
+    chrome.contextMenus.create({
+      id: `folder-more-${folder.id}`,
+      parentId: `folder-${folder.id}`,
+      title: `More... (${sortedSnippets.length - 6} more)`,
+      contexts: ['editable'],
+    });
+  }
+}
+
+// Helper function to create uncategorized submenu
+function createUncategorizedSubmenu(uncategorizedSnippets: Snippet[]) {
+  if (uncategorizedSnippets.length === 0) return;
+
+  chrome.contextMenus.create({
+    id: 'uncategorized-folder',
+    parentId: 'pasteSnippetParent',
+    title: '📄 Uncategorized',
+    contexts: ['editable'],
+  });
+
+  const displaySnippets = uncategorizedSnippets.slice(0, 6);
+  displaySnippets.forEach((snippet) => {
+    chrome.contextMenus.create({
+      id: `paste-snippet-${snippet.id}`,
+      parentId: 'uncategorized-folder',
+      title: truncateTitle(snippet),
+      contexts: ['editable'],
+    });
+  });
+
+  if (uncategorizedSnippets.length > 6) {
+    chrome.contextMenus.create({
+      id: 'uncategorized-separator',
+      parentId: 'uncategorized-folder',
+      type: 'separator',
+      contexts: ['editable'],
+    });
+    chrome.contextMenus.create({
+      id: 'uncategorized-more',
+      parentId: 'uncategorized-folder',
+      title: `More... (${uncategorizedSnippets.length - 6} more)`,
+      contexts: ['editable'],
+    });
+  }
+}
+
+// Helper function to truncate snippet titles
+function truncateTitle(snippet: Snippet): string {
+  const title = snippet.title || snippet.text;
+  return title.length > 30 ? title.substring(0, 27) + "..." : title;
 }
 
 chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
@@ -1070,7 +1314,12 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     
     return true; // Keep the message channel open for async response
   }
-  if (request.type === 'PASTE_SNIPPET' && sender.origin === chrome.runtime.getURL('').slice(0, -1)) {
+  if (request.action === 'updateContextMenu') {
+    // Update context menu when settings change
+    console.log('[Clippy] Updating context menu from settings change');
+    updatePasteContextMenu();
+    sendResponse({ success: true });
+  } else if (request.type === 'PASTE_SNIPPET' && sender.origin === chrome.runtime.getURL('').slice(0, -1)) {
     handlePasteRequest(request.snippet);
   } else if (request.type === 'PASTE_SNIPPET_BY_ID') {
     const { snippetId } = request;

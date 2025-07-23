@@ -19,6 +19,8 @@ type HotkeyMapping = {
   snippetId: string;
 };
 
+type ContextMenuMode = 'pinned' | 'folders' | 'hybrid';
+
 const HOTKEY_SLOTS = [
   { slot: 'hotkey-1', label: 'Hotkey 1' },
   { slot: 'hotkey-2', label: 'Hotkey 2' },
@@ -36,12 +38,15 @@ export const Settings: React.FC<SettingsProps> = ({
   const [snippets, setSnippets] = useState<Snippet[]>([]);
   const [hotkeyMappings, setHotkeyMappings] = useState<HotkeyMapping[]>([]);
   const [chromeHotkeys, setChromeHotkeys] = useState<Record<string, string>>({});
+  const [contextMenuMode, setContextMenuMode] = useState<ContextMenuMode>('hybrid');
+  const [contextMenuSaving, setContextMenuSaving] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  // Load data for hotkeys
+  // Load data for hotkeys and context menu
   const loadData = useCallback(async () => {
-    const result = await chrome.storage.local.get(['snippets', 'hotkeyMappings']);
+    const result = await chrome.storage.local.get(['snippets', 'hotkeyMappings', 'contextMenuMode']);
     setSnippets(result.snippets || []);
+    setContextMenuMode(result.contextMenuMode || 'hybrid');
     
     const storedMappings: HotkeyMapping[] = result.hotkeyMappings || [];
     const mappings: HotkeyMapping[] = HOTKEY_SLOTS.map(({ slot }) => {
@@ -79,6 +84,27 @@ export const Settings: React.FC<SettingsProps> = ({
 
   const handleCustomizeShortcut = () => {
     chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  };
+
+  // Handler: change context menu mode 
+  const handleContextMenuModeChange = async (mode: ContextMenuMode) => {
+    setContextMenuSaving(true);
+    setContextMenuMode(mode);
+    
+    // Save to storage immediately
+    await chrome.storage.local.set({ contextMenuMode: mode });
+    
+    // Send message to background script to update context menu
+    try {
+      await chrome.runtime.sendMessage({ action: 'updateContextMenu' });
+    } catch (error) {
+      console.warn('Failed to notify background script of context menu update:', error);
+    }
+
+    // Brief delay to show saving state
+    setTimeout(() => {
+      setContextMenuSaving(false);
+    }, 500);
   };
 
   const sections = [
@@ -151,6 +177,122 @@ export const Settings: React.FC<SettingsProps> = ({
             Refresh
           </Button>
         </div>
+      </div>
+
+      {/* Context Menu Layout Section */}
+      <div className="mt-6">
+        <h3 className="text-sm font-semibold text-slate-200 mb-2">Context Menu Layout</h3>
+        <p className="text-xs text-slate-400 mb-3">
+          Choose how Project Clippy appears when you right-click on web pages.
+        </p>
+        
+        <div className="grid grid-cols-1 gap-2">
+          {/* Pinned Only Mode */}
+          <div 
+            className={`border rounded-lg p-3 cursor-pointer transition-all ${
+              contextMenuMode === 'pinned' 
+                ? 'border-sky-500 bg-sky-500/10' 
+                : 'border-slate-600 hover:border-slate-500 bg-slate-800/30'
+            }`}
+            onClick={() => handleContextMenuModeChange('pinned')}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center">
+                <input
+                  type="radio"
+                  name="contextMenuMode"
+                  value="pinned"
+                  checked={contextMenuMode === 'pinned'}
+                  onChange={() => handleContextMenuModeChange('pinned')}
+                  className="mr-2 text-sky-500 text-xs"
+                />
+                <span className="font-medium text-slate-200 text-xs">Pinned Only</span>
+              </div>
+            </div>
+            <p className="text-xs text-slate-400 mb-2">Show only starred snippets</p>
+            
+            {/* Mini Visual Preview */}
+            <div className="bg-slate-900 rounded border border-slate-600 p-2 text-xs">
+              <div className="text-slate-300 font-semibold mb-1 text-xs">Project Clippy</div>
+              <div className="text-slate-400 pl-1 text-xs">⭐ Important</div>
+              <div className="text-slate-400 pl-1 text-xs">⭐ Quick reply</div>
+            </div>
+          </div>
+
+          {/* Folders Only Mode */}
+          <div 
+            className={`border rounded-lg p-3 cursor-pointer transition-all ${
+              contextMenuMode === 'folders' 
+                ? 'border-sky-500 bg-sky-500/10' 
+                : 'border-slate-600 hover:border-slate-500 bg-slate-800/30'
+            }`}
+            onClick={() => handleContextMenuModeChange('folders')}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center">
+                <input
+                  type="radio"
+                  name="contextMenuMode"
+                  value="folders"
+                  checked={contextMenuMode === 'folders'}
+                  onChange={() => handleContextMenuModeChange('folders')}
+                  className="mr-2 text-sky-500 text-xs"
+                />
+                <span className="font-medium text-slate-200 text-xs">Folders Only</span>
+              </div>
+            </div>
+            <p className="text-xs text-slate-400 mb-2">Show folders with submenus</p>
+            
+            {/* Mini Visual Preview */}
+            <div className="bg-slate-900 rounded border border-slate-600 p-2 text-xs">
+              <div className="text-slate-300 font-semibold mb-1 text-xs">Project Clippy</div>
+              <div className="text-slate-400 pl-1 text-xs">📁 Work ▶</div>
+              <div className="text-slate-400 pl-1 text-xs">🎨 Design ▶</div>
+            </div>
+          </div>
+
+          {/* Hybrid Mode */}
+          <div 
+            className={`border rounded-lg p-3 cursor-pointer transition-all ${
+              contextMenuMode === 'hybrid' 
+                ? 'border-sky-500 bg-sky-500/10' 
+                : 'border-slate-600 hover:border-slate-500 bg-slate-800/30'
+            }`}
+            onClick={() => handleContextMenuModeChange('hybrid')}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center">
+                <input
+                  type="radio"
+                  name="contextMenuMode"
+                  value="hybrid"
+                  checked={contextMenuMode === 'hybrid'}
+                  onChange={() => handleContextMenuModeChange('hybrid')}
+                  className="mr-2 text-sky-500 text-xs"
+                />
+                <span className="font-medium text-slate-200 text-xs">Pinned + Folders</span>
+                <span className="ml-2 text-xs bg-sky-600 text-white px-1.5 py-0.5 rounded">Default</span>
+              </div>
+            </div>
+            <p className="text-xs text-slate-400 mb-2">Show starred snippets first, then folders</p>
+            
+            {/* Mini Visual Preview */}
+            <div className="bg-slate-900 rounded border border-slate-600 p-2 text-xs">
+              <div className="text-slate-300 font-semibold mb-1 text-xs">Project Clippy</div>
+              <div className="text-slate-400 pl-1 text-xs">⭐ Important</div>
+              <div className="border-t border-slate-600 my-1"></div>
+              <div className="text-slate-400 pl-1 text-xs">📁 Work ▶</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Status/Feedback */}
+        {contextMenuSaving && (
+          <div className="mt-3 flex items-center justify-center text-xs text-green-400 bg-green-400/10 border border-green-400/20 rounded-lg p-2">
+            <span className="animate-spin mr-2">⟳</span>
+            Updating context menu...
+          </div>
+        )}
       </div>
     </div>
   );
