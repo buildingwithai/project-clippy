@@ -18,6 +18,7 @@ interface FolderTabsProps {
   isEditingOrCreatingFolder: boolean; // To disable add button during edits
   editingFolderId: string | null; // ID of the folder being edited/created
   onCancelRename: (folderId: string | null) => void; // Handler for cancelling edit/creation
+  onOpenSettings: () => void; // Handler for opening settings view
 }
 
 export const FolderTabs: React.FC<FolderTabsProps> = ({
@@ -31,6 +32,7 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
   isEditingOrCreatingFolder,
   editingFolderId,
   onCancelRename,
+  onOpenSettings,
 }) => {
   const [showSettingsTooltip, setShowSettingsTooltip] = useState(false);
 
@@ -49,7 +51,7 @@ export const FolderTabs: React.FC<FolderTabsProps> = ({
       setShowSettingsTooltip(false);
       chrome.storage.local.set({ hasSeenSettingsTooltip: true });
     }
-    chrome.runtime.openOptionsPage();
+    onOpenSettings();
   };
 
   const handleDeleteFolder = useCallback(async (folderId: string) => {

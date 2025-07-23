@@ -12,8 +12,8 @@ import { SnippetFormModal } from './components/SnippetFormModal';
 import { SnippetItem } from './components/SnippetItem';
 import { SortableSnippetItem } from './components/SortableSnippetItem';
 import type { TopTab } from './components/TopTabs';
-import { BankToggle } from './components/BankToggle';
 import { BankView, RemotePackMeta } from './components/BankView';
+import { Settings } from './components/Settings';
 import {
   DndContext,
   closestCenter,
@@ -41,8 +41,8 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState(''); // For snippet search
-  // Tabs: 'all' or 'bank'
-  const [activeTab, setActiveTab] = useState<TopTab>('all');
+  // View state: 'main' or 'settings'
+  const [currentView, setCurrentView] = useState<'main' | 'settings'>('main');
   const [activeFilterFolderId, setActiveFilterFolderId] = useState<string | null>(null);
   
 
@@ -765,41 +765,46 @@ const App: React.FC = () => {
         onDragEnd={handleDragEnd}
       >
         <div className="h-screen bg-background text-slate-100 flex flex-col">
-                  <FolderTabs
-          folders={folders}
-          activeFilterFolderId={activeFilterFolderId}
-          setActiveFilterFolderId={setActiveFilterFolderId}
-          onDeleteFolder={handleDeleteFolder}
-          onRenameFolder={handleFolderRename}
-          onEmojiChange={handleEmojiChange}
-          onAddNewFolder={handleCreateNewFolder}
-          isEditingOrCreatingFolder={!!editingFolderId}
-          editingFolderId={editingFolderId}
-          onCancelRename={handleCancelFolderEdit}
-        />
-        <main className="flex-1 p-4 overflow-auto flex flex-col pt-2">
-        
-          <div className="flex justify-between items-center mb-4">
-            <BankToggle activeTab={activeTab} setActiveTab={setActiveTab} />
-            
-            <GlowingButton onClick={handleOpenNewSnippetModal}>
-              + Add Snippet
-            </GlowingButton>
-          </div>
-
-          {activeTab !== 'bank' && (
-            <div className="mb-4">
-            <CustomTooltip content="Search through your snippets" side="bottom">
-              <Input
-                type="search"
-                placeholder="Search snippets..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-slate-800 border-slate-700 placeholder-slate-500 text-slate-100"
+          {currentView === 'settings' ? (
+            <Settings
+              onBack={() => setCurrentView('main')}
+              packs={packs}
+              onImportPack={handleImportPack}
+              importedPackIds={Array.from(importedPackIds)}
+            />
+          ) : (
+            <>
+              <FolderTabs
+                folders={folders}
+                activeFilterFolderId={activeFilterFolderId}
+                setActiveFilterFolderId={setActiveFilterFolderId}
+                onDeleteFolder={handleDeleteFolder}
+                onRenameFolder={handleFolderRename}
+                onEmojiChange={handleEmojiChange}
+                onAddNewFolder={handleCreateNewFolder}
+                isEditingOrCreatingFolder={!!editingFolderId}
+                editingFolderId={editingFolderId}
+                onCancelRename={handleCancelFolderEdit}
+                onOpenSettings={() => setCurrentView('settings')}
               />
-            </CustomTooltip>
-           </div>
-          )}
+              <main className="flex-1 p-4 overflow-auto flex flex-col pt-2">
+                <div className="flex justify-end items-center mb-4">
+                  <GlowingButton onClick={handleOpenNewSnippetModal}>
+                    + Add Snippet
+                  </GlowingButton>
+                </div>
+
+                <div className="mb-4">
+                  <CustomTooltip content="Search through your snippets" side="bottom">
+                    <Input
+                      type="search"
+                      placeholder="Search snippets..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full bg-slate-800 border-slate-700 placeholder-slate-500 text-slate-100"
+                    />
+                  </CustomTooltip>
+                </div>
 
           {pinnedSnippets.length === 0 && otherSnippets.length === 0 && !isLoading && (
             <div className="text-center text-slate-400 py-8 flex-grow flex flex-col items-center justify-center">
@@ -818,67 +823,64 @@ const App: React.FC = () => {
             </div>
           )}
 
-          <ScrollArea className="flex-grow">
-            <div className="space-y-4">
-              {/* Pinned Section */}
-              {activeTab !== 'bank' && pinnedSnippets.length > 0 && (
-                <section>
-                  <h3 className="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-2">Pinned</h3>
-                  <SortableContext
-                    items={getSnippetIds(pinnedSnippets)}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    <div className="space-y-3">
-                      {pinnedSnippets.map((snippet) => (
-                        <SortableSnippetItem
-                          key={snippet.id}
-                          snippet={snippet}
-                          copiedSnippetId={copiedSnippetId}
-                          onCopyToClipboard={handleCopyToClipboard}
-                          onOpenEditModal={handleOpenEditSnippetModal}
-                          onPinSnippet={handlePinSnippet}
-                          onDeleteSnippet={handleDeleteSnippet}
-                          getFolderById={getFolderById}
-                        />
-                      ))}
-                    </div>
-                  </SortableContext>
-                </section>
-              )}
+                <ScrollArea className="flex-grow">
+                  <div className="space-y-4">
+                    {/* Pinned Section */}
+                    {pinnedSnippets.length > 0 && (
+                      <section>
+                        <h3 className="text-sm font-semibold text-yellow-400 uppercase tracking-wider mb-2">Pinned</h3>
+                        <SortableContext
+                          items={getSnippetIds(pinnedSnippets)}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          <div className="space-y-3">
+                            {pinnedSnippets.map((snippet) => (
+                              <SortableSnippetItem
+                                key={snippet.id}
+                                snippet={snippet}
+                                copiedSnippetId={copiedSnippetId}
+                                onCopyToClipboard={handleCopyToClipboard}
+                                onOpenEditModal={handleOpenEditSnippetModal}
+                                onPinSnippet={handlePinSnippet}
+                                onDeleteSnippet={handleDeleteSnippet}
+                                getFolderById={getFolderById}
+                              />
+                            ))}
+                          </div>
+                        </SortableContext>
+                      </section>
+                    )}
 
-              {/* Bank view */}
-          {activeTab === 'bank' && (
-            <BankView packs={packs} onImportPack={handleImportPack} importedPackIds={importedPackIds} />
+                    {/* Other Snippets Section */}
+                    {otherSnippets.length > 0 && (
+                      <section>
+                        {pinnedSnippets.length > 0 && <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2 pt-2">All Snippets</h3>}
+                        <SortableContext
+                          items={getSnippetIds(otherSnippets)}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          <div className="space-y-3">
+                            {otherSnippets.map((snippet) => (
+                              <SortableSnippetItem
+                                key={snippet.id}
+                                snippet={snippet}
+                                copiedSnippetId={copiedSnippetId}
+                                onCopyToClipboard={handleCopyToClipboard}
+                                onOpenEditModal={handleOpenEditSnippetModal}
+                                onPinSnippet={handlePinSnippet}
+                                onDeleteSnippet={handleDeleteSnippet}
+                                getFolderById={getFolderById}
+                              />
+                            ))}
+                          </div>
+                        </SortableContext>
+                      </section>
+                    )}
+                  </div>
+                </ScrollArea>
+              </main>
+            </>
           )}
-
-          {/* Other Snippets Section */}
-              {otherSnippets.length > 0 && (
-                <section>
-                  {pinnedSnippets.length > 0 && <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2 pt-2">All Snippets</h3>}
-                  <SortableContext
-                    items={getSnippetIds(otherSnippets)}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    <div className="space-y-3">
-                      {otherSnippets.map((snippet) => (
-                        <SortableSnippetItem
-                          key={snippet.id}
-                          snippet={snippet}
-                          copiedSnippetId={copiedSnippetId}
-                          onCopyToClipboard={handleCopyToClipboard}
-                          onOpenEditModal={handleOpenEditSnippetModal}
-                          onPinSnippet={handlePinSnippet}
-                          onDeleteSnippet={handleDeleteSnippet}
-                          getFolderById={getFolderById}
-                        />
-                      ))}
-                    </div>
-                  </SortableContext>
-                </section>
-              )}
-            </div>
-          </ScrollArea>
-        </main>
         </div>
         
         {/* Drag Overlay */}
