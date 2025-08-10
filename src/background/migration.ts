@@ -2,10 +2,12 @@
  * Handles data migration for Project Clippy.
  */
 import type { Snippet } from '@/utils/types';
+import { migrateSnippetToNewFormat } from '@/utils/snippet-helpers';
 
 export const runMigrations = async (): Promise<void> => {
   console.log('Running migrations...');
   await migrateV1_to_V2();
+  await migrateV2_to_V3();
   console.log('Migrations complete.');
 };
 
@@ -40,5 +42,31 @@ const migrateV1_to_V2 = async (): Promise<void> => {
     console.log('Successfully migrated snippets to version 2.');
   } catch (error) {
     console.error('Error during V1 to V2 migration:', error);
+  }
+};
+
+/**
+ * Migration from V2 to V3.
+ * - Converts text/html from snippet root to versions array
+ * - Adds currentVersionIndex to all snippets
+ */
+const migrateV2_to_V3 = async (): Promise<void> => {
+  try {
+    const result = await chrome.storage.local.get({ snippets: [], version: 2 });
+    const snippets = result.snippets as Snippet[];
+    const currentVersion = result.version as number;
+
+    if (currentVersion >= 3) {
+      console.log('Data is already at version 3 or higher. No migration needed.');
+      return;
+    }
+
+    console.log('Migrating data from version 2 to 3 (version control system)...');
+    const migratedSnippets = snippets.map(migrateSnippetToNewFormat);
+
+    await chrome.storage.local.set({ snippets: migratedSnippets, version: 3 });
+    console.log('Successfully migrated snippets to version 3 with version control.');
+  } catch (error) {
+    console.error('Error during V2 to V3 migration:', error);
   }
 };

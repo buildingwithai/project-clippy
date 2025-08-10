@@ -6,11 +6,11 @@ import { createPortal } from 'react-dom';
 interface CustomTooltipProps {
   children: React.ReactNode;
   content: string;
-  side?: 'top' | 'right' | 'bottom' | 'left';
+  side?: 'top' | 'right' | 'bottom' | 'left' | 'bottom-left' | 'left-close';
 }
 
 // Helper function to calculate position based on side
-function getPositionFromSide(rect: DOMRect, side: 'top' | 'right' | 'bottom' | 'left') {
+function getPositionFromSide(rect: DOMRect, side: 'top' | 'right' | 'bottom' | 'left' | 'bottom-left' | 'left-close') {
   switch (side) {
     case 'top':
       return {
@@ -26,6 +26,16 @@ function getPositionFromSide(rect: DOMRect, side: 'top' | 'right' | 'bottom' | '
       return {
         left: rect.left - 35, // Increased offset to move further left
         top: rect.bottom - 12, // Position towards the bottom of the element
+      };
+    case 'left-close':
+      return {
+        left: rect.left - 15, // Much closer to button than regular left (-15px instead of -35px)
+        top: rect.bottom - 12, // Same vertical position as left
+      };
+    case 'bottom-left':
+      return {
+        left: rect.left - 10, // Slightly to the left to avoid cut-off
+        top: rect.bottom + 4, // Position below with small gap
       };
     case 'bottom':
     default:
@@ -135,7 +145,7 @@ export function CustomTooltip({ children, content, side = 'bottom' }: CustomTool
               fontSize: '0.7rem',
               lineHeight: '1rem',
               transformOrigin: 'center center',
-              transform: `translate(${side === 'right' ? '0' : side === 'left' ? '-100%' : '-50%'}, ${side === 'bottom' ? '0' : side === 'top' ? '-100%' : (side === 'left' ? '-50%' : '-50%')})`,
+              transform: `translate(${side === 'right' ? '0' : (side === 'left' || side === 'left-close' || side === 'bottom-left') ? '-100%' : '-50%'}, ${(side === 'bottom' || side === 'bottom-left') ? '0' : side === 'top' ? '-100%' : (side === 'left' || side === 'left-close') ? '-50%' : '-50%'})`,
             }}
             className="px-2 py-1 rounded-md bg-slate-800/95 backdrop-blur-sm text-slate-100 shadow-lg font-medium whitespace-nowrap border border-slate-700/50"
           >

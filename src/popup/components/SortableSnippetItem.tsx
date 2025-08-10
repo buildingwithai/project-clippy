@@ -12,6 +12,8 @@ interface SortableSnippetItemProps {
   onPinSnippet: (snippetId: string) => void;
   onDeleteSnippet: (snippetId: string) => void;
   getFolderById: (folderId?: string) => { id: string; name: string; emoji: string; } | null;
+  onVersionChange?: (snippetId: string, versionIndex: number) => void;
+  currentViewingIndex?: number;
 }
 
 export const SortableSnippetItem: React.FC<SortableSnippetItemProps> = ({
@@ -22,6 +24,8 @@ export const SortableSnippetItem: React.FC<SortableSnippetItemProps> = ({
   onPinSnippet,
   onDeleteSnippet,
   getFolderById,
+  onVersionChange,
+  currentViewingIndex,
 }) => {
   const {
     attributes,
@@ -60,6 +64,8 @@ export const SortableSnippetItem: React.FC<SortableSnippetItemProps> = ({
         onPinSnippet={onPinSnippet}
         onDeleteSnippet={onDeleteSnippet}
         getFolderById={getFolderById}
+        onVersionChange={onVersionChange}
+        currentViewingIndex={currentViewingIndex}
       />
     </div>
   );

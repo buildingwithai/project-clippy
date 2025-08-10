@@ -1,12 +1,14 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { Edit3, Copy, Check, Star, Trash2, Folder, Calendar, Clock, Repeat } from 'lucide-react';
+
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { CustomTooltip } from '@/components/ui/custom-tooltip';
-import { Edit3, Copy, Check, Star, Trash2, Folder, Calendar, Clock, Repeat } from 'lucide-react';
-import type { Snippet } from '@/utils/types';
+import { VersionCarousel } from '@/components/ui/version-carousel';
 import { cn } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
 import { formatDateToMD, formatCount } from '@/utils/format';
+import type { Snippet } from '@/utils/types';
 
 interface SnippetItemProps {
   snippet: Snippet;
@@ -16,6 +18,8 @@ interface SnippetItemProps {
   onPinSnippet: (snippetId: string) => void;
   onDeleteSnippet: (snippetId: string) => void;
   getFolderById: (folderId?: string) => { id: string; name: string; emoji: string; } | null;
+  onVersionChange?: (snippetId: string, versionIndex: number) => void;
+  currentViewingIndex?: number;
 }
 
 export const SnippetItem: React.FC<SnippetItemProps> = ({
@@ -26,6 +30,8 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
   onPinSnippet,
   onDeleteSnippet,
   getFolderById,
+  onVersionChange,
+  currentViewingIndex,
 }) => {
   return (
     <motion.div
@@ -42,7 +48,7 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
       <div className="flex justify-between items-start mb-1">
         <h3 className="text-md font-semibold text-sky-400">{snippet.title || 'Untitled Snippet'}</h3>
         <div className="flex items-center space-x-1">
-          <CustomTooltip content={snippet.isPinned ? 'Unpin Snippet' : 'Pin Snippet'} side="bottom">
+          <CustomTooltip content={snippet.isPinned ? 'Unpin Snippet' : 'Pin Snippet'} side="left">
             <Button
               variant="ghost"
               size="icon"
@@ -52,7 +58,7 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
               <Star size={14} className={cn(snippet.isPinned && 'text-yellow-400 fill-yellow-400')} />
             </Button>
           </CustomTooltip>
-          <CustomTooltip content="Edit" side="bottom">
+          <CustomTooltip content="Edit" side="left-close">
             <Button
               variant="ghost"
               size="icon"
@@ -64,7 +70,7 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
             </Button>
           </CustomTooltip>
 
-          <CustomTooltip content={copiedSnippetId === snippet.id ? 'Copied!' : 'Copy to clipboard'} side="bottom">
+          <CustomTooltip content={copiedSnippetId === snippet.id ? 'Copied!' : 'Copy to clipboard'} side="left">
             <Button
               variant="ghost"
               size="icon"
@@ -80,7 +86,7 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
             </Button>
           </CustomTooltip>
 
-          <CustomTooltip content="Delete" side="bottom">
+          <CustomTooltip content="Delete" side="left">
             <Button
               variant="ghost"
               size="icon"
@@ -122,16 +128,12 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
           </Badge>
         )}
       </div>
-      <div className="text-sm text-slate-300 bg-slate-900/50 p-2.5 rounded-md max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800">
-        {snippet.html ? (
-          <div 
-            className="whitespace-pre-wrap break-all snippet-html-content"
-            dangerouslySetInnerHTML={{ __html: snippet.html }} 
-          />
-        ) : (
-          <pre className="whitespace-pre-wrap break-all">{snippet.text}</pre>
-        )}
-      </div>
+      {/* Content area - always show version carousel */}
+      <VersionCarousel 
+        snippet={snippet} 
+        onVersionChange={onVersionChange}
+        currentViewingIndex={currentViewingIndex}
+      />
       
       {/* Styles for HTML content in snippets */}
       <style dangerouslySetInnerHTML={{

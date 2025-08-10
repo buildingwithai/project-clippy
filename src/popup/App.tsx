@@ -14,6 +14,8 @@ import { SortableSnippetItem } from './components/SortableSnippetItem';
 import type { TopTab } from './components/TopTabs';
 import { BankView, RemotePackMeta } from './components/BankView';
 import { Settings } from './components/Settings';
+import { migrateSnippetToNewFormat, getCurrentVersion, createNewVersion, updateCurrentVersion, getAllVersions } from '../utils/snippet-helpers';
+import { addTestVersionsToFirstSnippet, removeTestVersions } from '../utils/dev-helpers';
 import {
   DndContext,
   closestCenter,
@@ -50,6 +52,10 @@ const App: React.FC = () => {
   const [isSnippetModalOpen, setIsSnippetModalOpen] = useState(false);
   const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
   const [copiedSnippetId, setCopiedSnippetId] = useState<string | null>(null);
+
+  // Version tracking for editing
+  const [currentViewingVersions, setCurrentViewingVersions] = useState<Record<string, number>>({});
+  const [editMode, setEditMode] = useState<'create' | 'update' | 'create-version'>('create');
 
   // Top-level tab state (Pinned / Bank / All)
   
@@ -118,7 +124,14 @@ const App: React.FC = () => {
       text: template.text,
       createdAt: new Date().toISOString(),
       frequency: 0,
-      folderId: undefined
+      folderId: undefined,
+      versions: [{
+        id: `version-${packId}-snippet-${index + 1}-0`,
+        text: template.text,
+        html: undefined,
+        createdAt: new Date().toISOString(),
+      }],
+      currentVersionIndex: 0
     }));
   };
 
@@ -188,6 +201,13 @@ const App: React.FC = () => {
               ...sn,
               createdAt: new Date().toISOString(),
               frequency: 0,
+              versions: [{
+                id: `version-${sn.id}-0`,
+                text: sn.text,
+                html: undefined,
+                createdAt: new Date().toISOString(),
+              }],
+              currentVersionIndex: 0,
             });
           }
         }
@@ -224,6 +244,13 @@ const App: React.FC = () => {
             text, // ensure internal field is populated
             createdAt: new Date().toISOString(),
             frequency: 0,
+            versions: [{
+              id: `version-${sn.id}-0`,
+              text: text,
+              html: undefined,
+              createdAt: new Date().toISOString(),
+            }],
+            currentVersionIndex: 0,
           });
         }
       }
@@ -282,8 +309,17 @@ const App: React.FC = () => {
       const loadedSnippets: Snippet[] = result.snippets || [];
       const loadedFolders: Folder[] = result.folders || [];
 
-      setSnippets(loadedSnippets.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      // Migrate snippets to new format for runtime compatibility
+      const migratedSnippets = loadedSnippets.map(migrateSnippetToNewFormat);
+      
+      setSnippets(migratedSnippets.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
       setFolders(loadedFolders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+
+      // Development helpers - available in console
+      if (typeof window !== 'undefined') {
+        (window as any).addTestVersions = addTestVersionsToFirstSnippet;
+        (window as any).removeTestVersions = removeTestVersions;
+      }
 
       if (result.pendingSnippetText) {
         console.log('[Clippy] Popup - Pending snippet text found:', result.pendingSnippetText?.substring(0, 100) + '...');
@@ -531,10 +567,25 @@ const App: React.FC = () => {
     setIsSnippetModalOpen(true);
   };
 
-  // Handler to open the snippet modal for editing an existing snippet
+  // Handler to open edit modal with currently viewed version
   const handleOpenEditSnippetModal = (snippet: Snippet) => {
+    const viewingIndex = currentViewingVersions[snippet.id] ?? snippet.currentVersionIndex ?? 0;
+    const versions = getAllVersions(snippet);
+    const versionToEdit = versions[viewingIndex] || getCurrentVersion(snippet);
+    
     setEditingSnippet(snippet);
+    setEditMode('update');
+    setInitialSnippetText(versionToEdit.text);
+    setInitialSnippetHtml(versionToEdit.html || null);
     setIsSnippetModalOpen(true);
+  };
+
+  // Handler for version change in carousel
+  const handleVersionChange = (snippetId: string, versionIndex: number) => {
+    setCurrentViewingVersions(prev => ({
+      ...prev,
+      [snippetId]: versionIndex
+    }));
   };
 
   // Handler to close the snippet modal
@@ -546,25 +597,82 @@ const App: React.FC = () => {
   };
 
   // Handle saving snippet from modal (create or update)
-  const handleSaveFromModal = async (snippetData: { title: string; text: string; html?: string; folderId: string | null; id?: string }) => {
+  const handleSaveFromModal = async (snippetData: { title: string; text: string; html?: string; folderId: string | null; id?: string; isNewVersion?: boolean; originalSnippetId?: string }) => {
     let updatedSnippets;
     const finalFolderId = (snippetData.folderId === '' || snippetData.folderId === null) ? undefined : snippetData.folderId;
 
-    if (snippetData.id) { // Editing existing snippet
-      updatedSnippets = snippets.map(s =>
-        s.id === snippetData.id
-          ? { ...s, title: snippetData.title.trim(), text: snippetData.text.trim(), html: snippetData.html, folderId: finalFolderId, createdAt: s.createdAt } // Preserve original createdAt
-          : s
-      );
+    if (snippetData.isNewVersion && snippetData.originalSnippetId) {
+      // Creating new version of existing snippet
+      const existingSnippet = snippets.find(s => s.id === snippetData.originalSnippetId);
+      if (existingSnippet) {
+        const updatedSnippet = createNewVersion(existingSnippet, snippetData.text.trim(), snippetData.html);
+        const finalSnippet = { ...updatedSnippet, title: snippetData.title.trim(), folderId: finalFolderId };
+        
+        updatedSnippets = snippets.map(s => s.id === snippetData.originalSnippetId ? finalSnippet : s);
+        
+        // Auto-switch to the new version (it will be the latest version)
+        const newVersionIndex = finalSnippet.versions ? finalSnippet.versions.length - 1 : 0;
+        setCurrentViewingVersions(prev => ({
+          ...prev,
+          [snippetData.originalSnippetId!]: newVersionIndex
+        }));
+      } else {
+        updatedSnippets = snippets; // Snippet not found, no changes
+      }
+    } else if (snippetData.id) { // Editing existing snippet
+      const existingSnippet = snippets.find(s => s.id === snippetData.id);
+      if (existingSnippet) {
+        let updatedSnippet: Snippet;
+        
+        // Always use update mode since we're editing the current version
+        const currentVersionIndex = currentViewingVersions[snippetData.id] ?? existingSnippet.currentVersionIndex ?? 0;
+        
+        if (currentVersionIndex === (existingSnippet.currentVersionIndex ?? 0)) {
+          // Editing the current version - use updateCurrentVersion
+          updatedSnippet = updateCurrentVersion(existingSnippet, snippetData.text.trim(), snippetData.html);
+        } else {
+          // Editing a different version - need to update that specific version
+          const allVersions = getAllVersions(existingSnippet);
+          if (allVersions[currentVersionIndex]) {
+            const updatedVersions = [...allVersions];
+            updatedVersions[currentVersionIndex] = {
+              ...updatedVersions[currentVersionIndex],
+              text: snippetData.text.trim(),
+              html: snippetData.html,
+            };
+            updatedSnippet = {
+              ...existingSnippet,
+              versions: updatedVersions.slice(1), // Remove the current version since it's stored separately
+              text: updatedVersions[0].text,
+              html: updatedVersions[0].html,
+            };
+          } else {
+            // Fallback to updating current version
+            updatedSnippet = updateCurrentVersion(existingSnippet, snippetData.text.trim(), snippetData.html);
+          }
+        }
+        
+        updatedSnippet = { ...updatedSnippet, title: snippetData.title.trim(), folderId: finalFolderId };
+        updatedSnippets = snippets.map(s => s.id === snippetData.id ? updatedSnippet : s);
+      } else {
+        updatedSnippets = snippets; // Snippet not found, no changes
+      }
     } else { // New snippet
       const newSnippet: Snippet = {
         id: `snippet-${Date.now()}`,
         title: snippetData.title.trim(),
-        text: snippetData.text.trim(),
+        text: snippetData.text.trim(), // Will be migrated to versions array
         html: snippetData.html,
         folderId: finalFolderId,
         createdAt: new Date().toISOString(),
         frequency: 0,
+        versions: [{
+          id: `version-${Date.now()}-0`,
+          text: snippetData.text.trim(),
+          html: snippetData.html,
+          createdAt: new Date().toISOString(),
+        }],
+        currentVersionIndex: 0,
       };
       updatedSnippets = [newSnippet, ...snippets];
     }
@@ -844,6 +952,8 @@ const App: React.FC = () => {
                                 onPinSnippet={handlePinSnippet}
                                 onDeleteSnippet={handleDeleteSnippet}
                                 getFolderById={getFolderById}
+                                onVersionChange={handleVersionChange}
+                                currentViewingIndex={currentViewingVersions[snippet.id]}
                               />
                             ))}
                           </div>
@@ -870,6 +980,8 @@ const App: React.FC = () => {
                                 onPinSnippet={handlePinSnippet}
                                 onDeleteSnippet={handleDeleteSnippet}
                                 getFolderById={getFolderById}
+                                onVersionChange={handleVersionChange}
+                                currentViewingIndex={currentViewingVersions[snippet.id]}
                               />
                             ))}
                           </div>
