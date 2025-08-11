@@ -5,6 +5,7 @@
 import type { Snippet, Folder } from '@/utils/types';
 
 import { runMigrations } from './migration';
+import { getCurrentVersion } from '@/utils/snippet-helpers';
 
 const PACK_REGISTRY_URL = 'https://buildingwithai.github.io/project-clippy/packs/index.json';
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
@@ -402,10 +403,11 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       
       if (snippet && tab?.id) {
         console.log('[Clippy] Context menu paste - Executing script on tab:', tab.id);
+        const version = getCurrentVersion(snippet);
         chrome.scripting.executeScript({
           target: { tabId: tab.id, allFrames: true },
           func: pasteContentInActiveElementWithDebug,
-          args: [snippet.text, snippet.html],
+          args: [version.text, version.html ?? ''],
         }).then((results) => {
           console.log('[Clippy] Context menu paste - Script executed successfully:', results);
           
@@ -994,7 +996,7 @@ function pasteContentInActiveElement(textToPaste: string, htmlToPaste?: string) 
     try {
       if (method()) {
         console.log(`Paste successful with method: ${method.name}`);
-        return;
+        return true;
       }
     } catch (error) {
       console.warn(`Method ${method.name} failed:`, error);
@@ -1002,6 +1004,7 @@ function pasteContentInActiveElement(textToPaste: string, htmlToPaste?: string) 
   }
   
   console.warn('All paste methods failed, content may not have been inserted correctly');
+  return false;
 }
 
 // Legacy function for backward compatibility (currently unused)
@@ -1335,28 +1338,37 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
 
 async function handlePasteRequest(snippet: Snippet) {
   // DOMPurify is not available in the background service worker; use plain text
-  const sanitizedText = snippet.text;
-  const sanitizedHtml = snippet.html; // HTML is already captured, no need to sanitize further for basic formatting
+  const version = getCurrentVersion(snippet);
+  const sanitizedText = version.text;
+  const sanitizedHtml = version.html ?? ''; // Avoid undefined which is unserializable in executeScript args
   console.log('Pasting snippet:', { text: sanitizedText, html: sanitizedHtml }); // Debug log
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return;
 
-  // First, check if the active element is editable
+  // Attempt smart paste across frames first
   const injectionResults = await chrome.scripting.executeScript({
     target: { tabId: tab.id, allFrames: true },
-    func: () => document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement || (document.activeElement as HTMLElement).isContentEditable,
+    func: pasteContentInActiveElementWithDebug,
+    args: [sanitizedText, sanitizedHtml],
   });
 
-  if (injectionResults.some((r: chrome.scripting.InjectionResult) => r.result)) {
-    chrome.scripting.executeScript({
+  console.log('[Clippy] Debug paste results per frame:', injectionResults.map((r: any) => ({ frameId: r.frameId, result: r.result })));
+  let success = injectionResults.some((r: chrome.scripting.InjectionResult) => r.result === true);
+
+  if (!success) {
+    console.log('[Clippy] Debug paste unsuccessful in all frames. Trying legacy paste method...');
+    const legacyResults = await chrome.scripting.executeScript({
       target: { tabId: tab.id, allFrames: true },
       func: pasteContentInActiveElement,
       args: [sanitizedText, sanitizedHtml],
-    }).catch(err => console.error('Error pasting text:', err));
-  } else {
-    // If not editable, or if it's the address bar, copy to clipboard and notify
+    });
+    console.log('[Clippy] Legacy paste results per frame:', legacyResults.map((r: any) => ({ frameId: r.frameId, result: r.result })));
+    success = legacyResults.some((r: chrome.scripting.InjectionResult) => r.result === true);
+  }
+
+  if (!success) {
+    // If not editable or paste failed, copy to clipboard and optionally navigate
     await copyToClipboardAndNotify(sanitizedText, 'Pasted to clipboard!');
-    // If it looks like a URL, try to navigate
     if (sanitizedText.startsWith('http://') || sanitizedText.startsWith('https://')) {
       chrome.tabs.update(tab.id, { url: sanitizedText });
     }
@@ -1414,9 +1426,9 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
   }
 
   // Handle hotkey-1, hotkey-2, etc. commands
-  if (/^hotkey-\d+$/.test(command) && tab?.id) {
+  if (/^hotkey-\d+$/.test(command)) {
     const slot = command; // e.g., 'hotkey-1'
-    console.log(`[Clippy] Hotkey command received: ${command} (slot: ${slot}) on tab ${tab.id}`);
+    console.log(`[Clippy] Hotkey command received: ${command} (slot: ${slot}) on tab ${tab?.id}`);
     const result = await chrome.storage.local.get(['hotkeyMappings', 'snippets']);
     const hotkeyMappings = result.hotkeyMappings || [];
     const snippets: Snippet[] = result.snippets || [];
