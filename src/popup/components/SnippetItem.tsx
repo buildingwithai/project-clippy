@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { CustomTooltip } from '@/components/ui/custom-tooltip';
 import { VersionCarousel } from '@/components/ui/version-carousel';
+import { HotkeyBadge } from '@/components/ui/hotkey-badge';
 import { cn } from '@/lib/utils';
 import { formatDateToMD, formatCount } from '@/utils/format';
 import type { Snippet } from '@/utils/types';
@@ -20,6 +21,8 @@ interface SnippetItemProps {
   getFolderById: (folderId?: string) => { id: string; name: string; emoji: string; } | null;
   onVersionChange?: (snippetId: string, versionIndex: number) => void;
   currentViewingIndex?: number;
+  hotkeyMappings?: Array<{ slot: string; snippetId: string; }>;
+  chromeHotkeys?: Record<string, string>;
 }
 
 export const SnippetItem: React.FC<SnippetItemProps> = ({
@@ -32,7 +35,12 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
   getFolderById,
   onVersionChange,
   currentViewingIndex,
+  hotkeyMappings = [],
+  chromeHotkeys = {},
 }) => {
+  // Find which hotkey (if any) is assigned to this snippet
+  const assignedHotkey = hotkeyMappings.find(mapping => mapping.snippetId === snippet.id);
+  const hotkeyShortcut = assignedHotkey && chromeHotkeys[assignedHotkey.slot] ? chromeHotkeys[assignedHotkey.slot] : null;
   return (
     <motion.div
       layout
@@ -46,7 +54,12 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
       )}
     >
       <div className="flex justify-between items-start mb-1">
-        <h3 className="text-md font-semibold text-sky-400">{snippet.title || 'Untitled Snippet'}</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-md font-semibold text-sky-400">{snippet.title || 'Untitled Snippet'}</h3>
+          {hotkeyShortcut && (
+            <HotkeyBadge hotkey={hotkeyShortcut} />
+          )}
+        </div>
         <div className="flex items-center space-x-1">
           <CustomTooltip content={snippet.isPinned ? 'Unpin Snippet' : 'Pin Snippet'} side="left">
             <Button

@@ -114,7 +114,8 @@ export const VersionCarousel: React.FC<VersionCarouselProps> = ({
               duration: 0.28, 
               ease: [0.25, 0.1, 0.25, 1] // ease-out
             }}
-            className="text-sm text-slate-300 bg-slate-900/50 p-2.5 rounded-md max-h-20 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800"
+            className="text-slate-300 bg-slate-900/50 p-2.5 rounded-md max-h-20 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800"
+            style={{fontSize: '10px'}}
           >
             {error ? (
               <div className="text-red-400 text-xs">
@@ -166,7 +167,7 @@ export const VersionCarousel: React.FC<VersionCarouselProps> = ({
           disabled={!canGoPrevious}
           aria-label="Previous version"
         >
-          <ChevronLeft size={6} />
+          <ChevronLeft size={12} />
         </button>
         
         <span 
@@ -187,7 +188,7 @@ export const VersionCarousel: React.FC<VersionCarouselProps> = ({
           disabled={!canGoNext}
           aria-label="Next version"
         >
-          <ChevronRight size={6} />
+          <ChevronRight size={12} />
         </button>
       </div>
     </div>

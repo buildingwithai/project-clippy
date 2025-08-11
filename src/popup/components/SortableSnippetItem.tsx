@@ -14,6 +14,8 @@ interface SortableSnippetItemProps {
   getFolderById: (folderId?: string) => { id: string; name: string; emoji: string; } | null;
   onVersionChange?: (snippetId: string, versionIndex: number) => void;
   currentViewingIndex?: number;
+  hotkeyMappings?: Array<{ slot: string; snippetId: string; }>;
+  chromeHotkeys?: Record<string, string>;
 }
 
 export const SortableSnippetItem: React.FC<SortableSnippetItemProps> = ({
@@ -26,6 +28,8 @@ export const SortableSnippetItem: React.FC<SortableSnippetItemProps> = ({
   getFolderById,
   onVersionChange,
   currentViewingIndex,
+  hotkeyMappings,
+  chromeHotkeys,
 }) => {
   const {
     attributes,
@@ -66,6 +70,8 @@ export const SortableSnippetItem: React.FC<SortableSnippetItemProps> = ({
         getFolderById={getFolderById}
         onVersionChange={onVersionChange}
         currentViewingIndex={currentViewingIndex}
+        hotkeyMappings={hotkeyMappings}
+        chromeHotkeys={chromeHotkeys}
       />
     </div>
   );

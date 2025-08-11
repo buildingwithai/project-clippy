@@ -8,6 +8,18 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { CustomTooltip } from '@/components/ui/custom-tooltip';
 import { GlowingButton } from '@/components/ui/glowing-button';
 import type { Snippet, Folder } from '../utils/types';
+
+type HotkeyMapping = {
+  slot: string; // e.g. 'hotkey-1'
+  snippetId: string;
+};
+
+const HOTKEY_SLOTS = [
+  { slot: 'hotkey-1', label: 'Hotkey 1' },
+  { slot: 'hotkey-2', label: 'Hotkey 2' },
+  { slot: 'hotkey-3', label: 'Hotkey 3' },
+  { slot: 'hotkey-4', label: 'Hotkey 4' },
+];
 import { SnippetFormModal } from './components/SnippetFormModal';
 import { SnippetItem } from './components/SnippetItem';
 import { SortableSnippetItem } from './components/SortableSnippetItem';
@@ -46,6 +58,10 @@ const App: React.FC = () => {
   // View state: 'main' or 'settings'
   const [currentView, setCurrentView] = useState<'main' | 'settings'>('main');
   const [activeFilterFolderId, setActiveFilterFolderId] = useState<string | null>(null);
+  
+  // Hotkey mappings state
+  const [hotkeyMappings, setHotkeyMappings] = useState<HotkeyMapping[]>([]);
+  const [chromeHotkeys, setChromeHotkeys] = useState<Record<string, string>>({}); // slot -> chrome shortcut
   
 
   // Snippet modal state
@@ -305,9 +321,28 @@ const App: React.FC = () => {
   const loadSnippetsAndFolders = useCallback(async () => {
     setIsLoading(true);
     try {
-      const result = await chrome.storage.local.get(['snippets', 'folders', 'pendingSnippetText', 'pendingSnippetHtml']);
+      const result = await chrome.storage.local.get(['snippets', 'folders', 'pendingSnippetText', 'pendingSnippetHtml', 'hotkeyMappings']);
       const loadedSnippets: Snippet[] = result.snippets || [];
       const loadedFolders: Folder[] = result.folders || [];
+      
+      // Load hotkey mappings
+      const storedMappings: HotkeyMapping[] = result.hotkeyMappings || [];
+      const mappings: HotkeyMapping[] = HOTKEY_SLOTS.map(({ slot }) => {
+        const found = storedMappings.find(m => m.slot === slot);
+        return { slot, snippetId: found?.snippetId || '' };
+      });
+      setHotkeyMappings(mappings);
+
+      // Get actual assigned Chrome shortcuts
+      if (chrome.commands && chrome.commands.getAll) {
+        chrome.commands.getAll((commands) => {
+          const mapping: Record<string, string> = {};
+          commands.forEach(cmd => {
+            if (cmd.name && cmd.shortcut) mapping[cmd.name] = cmd.shortcut;
+          });
+          setChromeHotkeys(mapping);
+        });
+      }
 
       // Migrate snippets to new format for runtime compatibility
       const migratedSnippets = loadedSnippets.map(migrateSnippetToNewFormat);
@@ -896,22 +931,21 @@ const App: React.FC = () => {
                 onOpenSettings={() => setCurrentView('settings')}
               />
               <main className="flex-1 p-4 overflow-auto flex flex-col pt-2">
-                <div className="flex justify-end items-center mb-4">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="flex-1">
+                    <CustomTooltip content="Search through your snippets" side="bottom">
+                      <Input
+                        type="search"
+                        placeholder="Search snippets..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full bg-slate-800 border-slate-700 placeholder-slate-500 text-slate-100"
+                      />
+                    </CustomTooltip>
+                  </div>
                   <GlowingButton onClick={handleOpenNewSnippetModal}>
                     + Add Snippet
                   </GlowingButton>
-                </div>
-
-                <div className="mb-4">
-                  <CustomTooltip content="Search through your snippets" side="bottom">
-                    <Input
-                      type="search"
-                      placeholder="Search snippets..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full bg-slate-800 border-slate-700 placeholder-slate-500 text-slate-100"
-                    />
-                  </CustomTooltip>
                 </div>
 
           {pinnedSnippets.length === 0 && otherSnippets.length === 0 && !isLoading && (
@@ -954,6 +988,8 @@ const App: React.FC = () => {
                                 getFolderById={getFolderById}
                                 onVersionChange={handleVersionChange}
                                 currentViewingIndex={currentViewingVersions[snippet.id]}
+                                hotkeyMappings={hotkeyMappings}
+                                chromeHotkeys={chromeHotkeys}
                               />
                             ))}
                           </div>
@@ -982,6 +1018,8 @@ const App: React.FC = () => {
                                 getFolderById={getFolderById}
                                 onVersionChange={handleVersionChange}
                                 currentViewingIndex={currentViewingVersions[snippet.id]}
+                                hotkeyMappings={hotkeyMappings}
+                                chromeHotkeys={chromeHotkeys}
                               />
                             ))}
                           </div>
@@ -1006,6 +1044,8 @@ const App: React.FC = () => {
               onPinSnippet={handlePinSnippet}
               onDeleteSnippet={handleDeleteSnippet}
               getFolderById={getFolderById}
+              hotkeyMappings={hotkeyMappings}
+              chromeHotkeys={chromeHotkeys}
             />
           ) : null}
         </DragOverlay>
