@@ -7,6 +7,8 @@ import type { Snippet, Folder } from '@/utils/types';
 import { runMigrations } from './migration';
 import { getCurrentVersion } from '@/utils/snippet-helpers';
 
+import { parseVariables, resolveVariables } from '@/utils/variables';
+
 const PACK_REGISTRY_URL = 'https://buildingwithai.github.io/project-clippy/packs/index.json';
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 
@@ -1336,25 +1338,76 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
   return true; // Keep channel open for async responses
 });
 
-async function handlePasteRequest(snippet: Snippet) {
-  // DOMPurify is not available in the background service worker; use plain text
+async function handlePasteRequest(snippet: Snippet, isHotkey = false) {
   const version = getCurrentVersion(snippet);
-  const sanitizedText = version.text;
-  const sanitizedHtml = version.html ?? ''; // Avoid undefined which is unserializable in executeScript args
-  console.log('Pasting snippet:', { text: sanitizedText, html: sanitizedHtml }); // Debug log
+  let textToUse = version.text;
+  let htmlToUse = version.html ?? '';
+  
+  // For hotkey pasting, strip HTML to prevent false success in legacy paste function
+  if (isHotkey) {
+    htmlToUse = '';
+    console.log('[Clippy] Hotkey paste: HTML stripped, using plain text only');
+  }
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return;
 
-  // Attempt smart paste across frames first
+  const defs = parseVariables(version.text, version.html);
+  if (defs.length > 0) {
+    const domain = (() => {
+      try {
+        const u = tab.url ? new URL(tab.url) : null;
+        if (!u) return null;
+        const parts = u.hostname.split('.');
+        return parts.length <= 2 ? u.hostname : parts.slice(-2).join('.');
+      } catch { return null; }
+    })();
+
+    const store = await chrome.storage.local.get('variableDefaults');
+    const defaultsByDomain = store.variableDefaults || {};
+    const domainDefaults = (domain && defaultsByDomain[domain] && defaultsByDomain[domain][snippet.id]) || {};
+    const initialValues: Record<string,string> = {};
+    for (const d of defs) initialValues[d.name] = domainDefaults[d.name] ?? (d.defaultValue ?? '');
+    const needsPrompt = defs.some(d => (initialValues[d.name] || '').trim() === '');
+
+    if (needsPrompt) {
+      const response = await chrome.tabs.sendMessage(tab.id, { type: 'OPEN_VARIABLE_POPOVER', vars: defs, values: initialValues });
+      if (!response || response.cancelled) return;
+      const values = response.values as Record<string,string>;
+      if (response.remember && domain) {
+        const nextStore = (await chrome.storage.local.get('variableDefaults')).variableDefaults || {};
+        nextStore[domain] = nextStore[domain] || {};
+        nextStore[domain][snippet.id] = { ...(nextStore[domain][snippet.id] || {}), ...values };
+        await chrome.storage.local.set({ variableDefaults: nextStore });
+      }
+      const resolved = resolveVariables({ text: version.text, html: version.html }, values);
+      textToUse = resolved.text ?? '';
+      htmlToUse = resolved.html ?? '';
+    } else {
+      const resolved = resolveVariables({ text: version.text, html: version.html }, initialValues);
+      textToUse = resolved.text ?? '';
+      htmlToUse = resolved.html ?? '';
+    }
+    
+    // Strip HTML again after variable resolution for hotkey calls
+    if (isHotkey) {
+      htmlToUse = '';
+      console.log('[Clippy] Hotkey paste: HTML stripped again after variable resolution');
+    }
+  }
+
+  const sanitizedText = textToUse;
+  const sanitizedHtml = htmlToUse;
   const injectionResults = await chrome.scripting.executeScript({
     target: { tabId: tab.id, allFrames: true },
     func: pasteContentInActiveElementWithDebug,
     args: [sanitizedText, sanitizedHtml],
   });
 
-  console.log('[Clippy] Debug paste results per frame:', injectionResults.map((r: any) => ({ frameId: r.frameId, result: r.result })));
+  console.log('[Clippy] Debug paste results per frame:', injectionResults);
+  console.log('[Clippy] Detailed paste results:', injectionResults.map(r => ({ frameId: r.frameId, result: r.result })));
   let success = injectionResults.some((r: chrome.scripting.InjectionResult) => r.result === true);
-
+  console.log('[Clippy] Initial paste success evaluation:', success);
+  
   if (!success) {
     console.log('[Clippy] Debug paste unsuccessful in all frames. Trying legacy paste method...');
     const legacyResults = await chrome.scripting.executeScript({
@@ -1362,36 +1415,180 @@ async function handlePasteRequest(snippet: Snippet) {
       func: pasteContentInActiveElement,
       args: [sanitizedText, sanitizedHtml],
     });
-    console.log('[Clippy] Legacy paste results per frame:', legacyResults.map((r: any) => ({ frameId: r.frameId, result: r.result })));
+    console.log('[Clippy] Legacy paste results per frame:', legacyResults);
+    console.log('[Clippy] Detailed legacy results:', legacyResults.map(r => ({ frameId: r.frameId, result: r.result })));
     success = legacyResults.some((r: chrome.scripting.InjectionResult) => r.result === true);
+    console.log('[Clippy] Legacy paste success evaluation:', success);
   }
+  
+  console.log('[Clippy] Final paste success status:', success);
 
   if (!success) {
-    // If not editable or paste failed, copy to clipboard and optionally navigate
-    await copyToClipboardAndNotify(sanitizedText, 'Pasted to clipboard!');
-    if (sanitizedText.startsWith('http://') || sanitizedText.startsWith('https://')) {
-      chrome.tabs.update(tab.id, { url: sanitizedText });
+    console.log('[Clippy] Attempting clipboard fallback for text:', sanitizedText.substring(0, 50) + '...');
+    try {
+      await copyToClipboardAndNotify(sanitizedText, 'Copied to clipboard! Paste with Ctrl+V');
+      console.log('[Clippy] Successfully copied to clipboard as fallback');
+    } catch (clipboardError) {
+      console.error('[Clippy] Both paste and clipboard fallback failed:', clipboardError);
+      console.error('[Clippy] Clipboard error details:', clipboardError instanceof Error ? clipboardError.message : String(clipboardError));
+      
+      // Show error notification instead of navigating to URLs
+      if (chrome.notifications && chrome.notifications.create) {
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon48.png'),
+          title: 'Clippy - Paste Failed',
+          message: 'Unable to paste or copy snippet. Please try again or paste manually.',
+        });
+      }
+      
+      console.error('[Clippy] All paste and clipboard methods failed for text:', sanitizedText.substring(0, 50) + '...');
+      
+      // REMOVED: Automatic URL navigation - this was causing the unwanted redirects
+      // The extension should never automatically navigate to URLs without explicit user intent
     }
   }
 }
 
 async function copyToClipboardAndNotify(text: string, message: string) {
+  console.log('[Clippy] copyToClipboardAndNotify called with text:', text.substring(0, 50) + '...');
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tabs[0]?.id) {
+    console.error('[Clippy] No active tab found for clipboard copy');
+    throw new Error('No active tab found');
+  }
+
+  console.log('[Clippy] Active tab found, attempting clipboard copy to tab:', tabs[0].id);
   try {
-    // Use the offscreen document to write to the clipboard
-    await chrome.scripting.executeScript({
-      target: { tabId: (await chrome.tabs.query({ active: true, currentWindow: true }))[0].id! },
-      func: (textToCopy) => navigator.clipboard.writeText(textToCopy),
+    // Try multiple clipboard methods for better compatibility
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      func: (textToCopy) => {
+        console.log('[Clippy Content] Starting clipboard copy for:', textToCopy.substring(0, 50) + '...');
+        
+        // Simpler, more reliable approach
+        try {
+          // Method 1: Try modern clipboard API first
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            console.log('[Clippy Content] Trying modern clipboard API');
+            return navigator.clipboard.writeText(textToCopy)
+              .then(() => {
+                console.log('[Clippy Content] Modern clipboard API success');
+                return 'clipboard-api-success';
+              })
+              .catch(error => {
+                console.warn('[Clippy Content] Modern clipboard API failed:', error);
+                // Method 2: Fallback to execCommand
+                console.log('[Clippy Content] Trying execCommand fallback');
+                try {
+                  const textArea = document.createElement('textarea');
+                  textArea.value = textToCopy;
+                  textArea.style.position = 'fixed';
+                  textArea.style.left = '-999999px';
+                  textArea.style.top = '-999999px';
+                  document.body.appendChild(textArea);
+                  textArea.focus();
+                  textArea.select();
+                  
+                  const successful = document.execCommand('copy');
+                  document.body.removeChild(textArea);
+                  
+                  if (successful) {
+                    console.log('[Clippy Content] execCommand success');
+                    return 'execCommand-success';
+                  } else {
+                    console.error('[Clippy Content] execCommand failed');
+                    throw new Error('execCommand failed');
+                  }
+                } catch (execError) {
+                  console.error('[Clippy Content] execCommand error:', execError);
+                  throw new Error('All clipboard methods failed: ' + (execError instanceof Error ? execError.message : String(execError)));
+                }
+              });
+          } else {
+            // No modern clipboard API, try execCommand directly
+            console.log('[Clippy Content] No modern clipboard API, using execCommand only');
+            try {
+              const textArea = document.createElement('textarea');
+              textArea.value = textToCopy;
+              textArea.style.position = 'fixed';
+              textArea.style.left = '-999999px';
+              textArea.style.top = '-999999px';
+              document.body.appendChild(textArea);
+              textArea.focus();
+              textArea.select();
+              
+              const successful = document.execCommand('copy');
+              document.body.removeChild(textArea);
+              
+              if (successful) {
+                console.log('[Clippy Content] execCommand-only success');
+                return Promise.resolve('execCommand-only-success');
+              } else {
+                console.error('[Clippy Content] execCommand-only failed');
+                return Promise.reject(new Error('execCommand failed - no clipboard API available'));
+              }
+            } catch (execError) {
+              console.error('[Clippy Content] execCommand-only error:', execError);
+              return Promise.reject(new Error('No clipboard support available: ' + (execError instanceof Error ? execError.message : String(execError))));
+            }
+          }
+        } catch (error) {
+          console.error('[Clippy Content] Clipboard copy failed with error:', error);
+          return Promise.reject(error);
+        }
+      },
       args: [text],
+    }).catch(scriptError => {
+      console.error('[Clippy] Script execution failed:', scriptError);
+      throw new Error('Failed to execute clipboard script: ' + scriptError.message);
     });
 
-    chrome.notifications.create({
-      type: 'basic',
-      iconUrl: 'icons/icon48.png',
-      title: 'Clippy',
-      message: message,
-    });
+    console.log('[Clippy] Clipboard script execution results:', results);
+    console.log('[Clippy] Successfully copied to clipboard');
+
+    // Show notification
+    if (chrome.notifications && chrome.notifications.create) {
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon48.png'),
+        title: 'Clippy',
+        message: message,
+      });
+    } else {
+      console.log('[Clippy]', message);
+    }
   } catch (err) {
-    console.error('Failed to copy to clipboard:', err);
+    console.error('Failed to copy to clipboard with all methods:', err);
+    
+    // Final fallback: Try to use offscreen document for clipboard access
+    try {
+      console.log('[Clippy] Trying offscreen document clipboard fallback');
+      await chrome.action.setBadgeText({ text: '📋' });
+      await chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
+      
+      // Show a different notification indicating manual paste required
+      if (chrome.notifications && chrome.notifications.create) {
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon48.png'),
+          title: 'Clippy - Manual Paste Required',
+          message: `Text ready: "${text.substring(0, 30)}..." - Copy from popup and paste manually.`,
+        });
+      }
+      
+      // Clear badge after 3 seconds
+      setTimeout(() => {
+        chrome.action.setBadgeText({ text: '' });
+      }, 3000);
+      
+      // Don't throw - this is a partial success state
+      console.log('[Clippy] Fallback notification shown, text available for manual copy');
+      return;
+    } catch (fallbackError) {
+      console.error('[Clippy] Even fallback notification failed:', fallbackError);
+      throw err; // Re-throw original error
+    }
   }
 }
 
@@ -1410,7 +1607,7 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
     if (tab.url?.startsWith('chrome://')) {
       chrome.notifications.create({
         type: 'basic',
-        iconUrl: 'icons/icon48.png',
+        iconUrl: chrome.runtime.getURL('icons/icon48.png'),
         title: 'Clippy Action',
         message: "Clippy cannot be used on this special Chrome page."
       });
@@ -1437,7 +1634,7 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
       console.warn(`[Clippy] No snippet mapped for slot ${slot}`);
       chrome.notifications.create({
         type: 'basic',
-        iconUrl: 'icons/icon48.png',
+        iconUrl: chrome.runtime.getURL('icons/icon48.png'),
         title: 'Clippy',
         message: `No snippet mapped for ${slot}. Set it in Clippy Options.`,
       });
@@ -1448,7 +1645,7 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
       console.warn(`[Clippy] Snippet with ID ${mapping.snippetId} not found for slot ${slot}`);
       chrome.notifications.create({
         type: 'basic',
-        iconUrl: 'icons/icon48.png',
+        iconUrl: chrome.runtime.getURL('icons/icon48.png'),
         title: 'Clippy',
         message: `Snippet not found.`,
       });
@@ -1456,7 +1653,7 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
     }
     // Paste the snippet
     console.log(`[Clippy] Pasting snippet for slot ${slot}:`, snippet);
-    handlePasteRequest(snippet);
+    handlePasteRequest(snippet, true); // isHotkey = true to strip HTML
   }
 });
 
