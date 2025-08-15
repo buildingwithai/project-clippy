@@ -632,7 +632,7 @@ const App: React.FC = () => {
   };
 
   // Handle saving snippet from modal (create or update)
-  const handleSaveFromModal = async (snippetData: { title: string; text: string; html?: string; folderId: string | null; id?: string; isNewVersion?: boolean; originalSnippetId?: string }) => {
+  const handleSaveFromModal = async (snippetData: { title: string; text: string; html?: string; folderId: string | null; id?: string; isNewVersion?: boolean; originalSnippetId?: string; versionTitle?: string }) => {
     let updatedSnippets;
     const finalFolderId = (snippetData.folderId === '' || snippetData.folderId === null) ? undefined : snippetData.folderId;
 
@@ -640,7 +640,7 @@ const App: React.FC = () => {
       // Creating new version of existing snippet
       const existingSnippet = snippets.find(s => s.id === snippetData.originalSnippetId);
       if (existingSnippet) {
-        const updatedSnippet = createNewVersion(existingSnippet, snippetData.text.trim(), snippetData.html);
+        const updatedSnippet = createNewVersion(existingSnippet, snippetData.text.trim(), snippetData.html, snippetData.versionTitle);
         const finalSnippet = { ...updatedSnippet, title: snippetData.title.trim(), folderId: finalFolderId };
         
         updatedSnippets = snippets.map(s => s.id === snippetData.originalSnippetId ? finalSnippet : s);

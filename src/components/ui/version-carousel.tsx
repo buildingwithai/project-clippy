@@ -128,9 +128,9 @@ export const VersionCarousel: React.FC<VersionCarouselProps> = ({
                   dangerouslySetInnerHTML={{ 
                     __html: (() => {
                       const textContent = currentVersion.html.replace(/<[^>]*>/g, ''); // Strip HTML tags for length calculation
-                      if (textContent.length > 20) {
+                      if (textContent.length > 100) {
                         // For HTML content, we truncate the text content and add ellipsis
-                        return textContent.substring(0, 20) + '...';
+                        return textContent.substring(0, 100) + '...';
                       }
                       return currentVersion.html;
                     })()
@@ -138,8 +138,8 @@ export const VersionCarousel: React.FC<VersionCarouselProps> = ({
                 />
               ) : (
                 <pre className="whitespace-pre-wrap break-all">
-                  {currentVersion.text.length > 20 
-                    ? currentVersion.text.substring(0, 20) + '...'
+                  {currentVersion.text.length > 100 
+                    ? currentVersion.text.substring(0, 100) + '...'
                     : currentVersion.text
                   }
                 </pre>
@@ -170,13 +170,20 @@ export const VersionCarousel: React.FC<VersionCarouselProps> = ({
           <ChevronLeft size={12} />
         </button>
         
-        <span 
-          className="text-[9px] font-mono text-slate-400 px-1 select-none"
-          aria-live="polite"
-          aria-label={`Version ${viewingVersionIndex}`}
-        >
-          v{viewingVersionIndex}
-        </span>
+        <div className="flex justify-between items-start mb-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-md font-semibold text-sky-400">
+              {currentVersion?.title || snippet.title || 'Untitled Snippet'}
+            </h3>
+          </div>
+          <span 
+            className="text-[9px] font-mono text-slate-400 px-1 select-none"
+            aria-live="polite"
+            aria-label={`Version ${viewingVersionIndex}`}
+          >
+            v{viewingVersionIndex}
+          </span>
+        </div>
         
         <button
           className={cn(

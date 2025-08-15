@@ -4,6 +4,7 @@
 
 export interface SnippetVersion {
   id: string;      // Unique identifier for this version
+  title?: string;  // Optional title for this version
   text: string;    // The snippet content (plain text)
   html?: string;   // Optional: HTML content for rich formatting
   createdAt: string; // ISO date string for when this version was created

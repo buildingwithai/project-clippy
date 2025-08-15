@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { MagnetizeButton } from '@/components/ui/magnetize-button';
@@ -45,28 +45,50 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
   const [useSimpleEditor, setUseSimpleEditor] = useState(false);
   const [isCreatingNewVersion, setIsCreatingNewVersion] = useState(false);
   const [versionMode, setVersionMode] = useState<'edit' | 'create'>('edit');
+  const [savedContent, setSavedContent] = useState<{ text: string; html?: string; title: string }>({ text: '', html: undefined, title: '' });
+  const [createModeContent, setCreateModeContent] = useState<{ text: string; html?: string; versionTitle: string }>({ text: '', html: undefined, versionTitle: '' });
+  const [isSwitchingTabs, setIsSwitchingTabs] = useState(false);
+  const [versionTitle, setVersionTitle] = useState('');
   
   // Remove manual slash command state - using YooptaRichEditor for both modes
 
-  // Initialize modal content when opened
+  // Initialize modal content when opened (but not during tab switches)
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || isSwitchingTabs) return;
     
     if (snippetToEdit) {
       // Editing existing snippet
       setTitle(snippetToEdit.title || '');
-      setText(snippetToEdit.text || '');
-      setHtml(snippetToEdit.html || undefined);
+      const currentVersion = snippetToEdit.versions?.[snippetToEdit.currentVersionIndex ?? 0] || snippetToEdit;
+      const originalText = currentVersion.text || '';
+      const originalHtml = currentVersion.html || undefined;
+      
+      setText(originalText);
+      setHtml(originalHtml);
       setSelectedFolderId(snippetToEdit.folderId || null);
-      setVersionMode('edit');
+      setVersionMode('edit'); // Always start in edit mode when editing
+      setVersionTitle(''); // Clear version title
+      
+      // Store the original content for restoration
+      setSavedContent({ text: originalText, html: originalHtml, title: snippetToEdit.title || '' });
     } else {
       // Creating new snippet
       setTitle('');
       setText(initialText || '');
       setHtml(initialHtml || undefined);
       setSelectedFolderId(null);
-      setVersionMode('edit');
+      setVersionMode('edit'); // Reset to edit mode for new snippets
+      setVersionTitle(''); // Clear version title
+      setSavedContent({ text: '', html: undefined, title: '' }); // Clear saved content
+      // Don't reset createModeContent - preserve any previously typed content
     }
+    
+    // Cleanup function to reset states when modal closes
+    return () => {
+      if (!isOpen) {
+        setIsSwitchingTabs(false);
+      }
+    };
   }, [isOpen, snippetToEdit, initialText, initialHtml]);
 
   // Remove manual slash command menu effect - using YooptaRichEditor for both modes
@@ -77,10 +99,36 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
     setHtml(content.html);
   };
 
-  // Handle version mode toggle
-  const handleVersionModeChange = (newMode: 'edit' | 'create') => {
-    setVersionMode(newMode);
-  };
+  // Handle version mode toggle - use useCallback to ensure fresh closure values
+  const handleVersionModeChange = useCallback((newMode: 'edit' | 'create') => {
+    // Prevent useEffect from interfering during tab switch
+    setIsSwitchingTabs(true);
+    
+    if (newMode === 'create') {
+      // Save current content to savedContent before switching
+      setSavedContent({ text, html, title });
+      
+      // Switch to create mode - restore previously entered create content
+      setVersionMode(newMode);
+      setText(createModeContent.text);
+      setHtml(createModeContent.html);
+      setVersionTitle(createModeContent.versionTitle);
+    } else {
+      // Save current content to createModeContent before switching  
+      setCreateModeContent({ text, html, versionTitle });
+      
+      // Switch back to edit mode - restore saved content
+      setVersionMode(newMode);
+      setText(savedContent.text);
+      setHtml(savedContent.html);
+      setTitle(savedContent.title);
+      setVersionTitle('');
+    }
+    
+    // Allow useEffect to run again after state updates complete
+    setTimeout(() => setIsSwitchingTabs(false), 0);
+  }, [text, html, title, versionTitle, createModeContent, savedContent]);
+
 
   // Remove manual slash commands - using YooptaRichEditor for both modes
 
@@ -103,6 +151,7 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
       folderId: selectedFolderId,
       isNewVersion: isCreatingNewVersion || undefined,
       originalSnippetId: isCreatingNewVersion ? snippetToEdit?.id : undefined,
+      versionTitle: versionTitle.trim() || undefined, // Include version-specific title
     };
     onSave(snippetData);
     onClose();
@@ -203,6 +252,21 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
             </div>
           </div>
           
+          {/* Version title field when creating new version */}
+          {snippetToEdit && versionMode === 'create' && (
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <Input
+                  id="version-title"
+                  value={versionTitle}
+                  onChange={(e) => setVersionTitle(e.target.value)}
+                  className="h-9 bg-slate-800/50 text-slate-100 border-slate-700/50 placeholder:text-slate-500 text-sm focus-visible:ring-1 focus-visible:ring-sky-500"
+                  placeholder="Version title (optional)..."
+                />
+              </div>
+            </div>
+          )}
+          
           {/* Content editor - clean and focused */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -218,6 +282,7 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
 
             {useSimpleEditor ? (
               <textarea
+                key={`textarea-${versionMode}`}
                 value={text}
                 onChange={(e) => {
                   setText(e.target.value);
@@ -228,6 +293,7 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
               />
             ) : (
               <SimpleRichEditor
+                key={`richeditor-${versionMode}`}
                 value={html || (text ? `<p>${text.replace(/\n/g, '</p><p>')}</p>` : '')}
                 onChange={handleEditorChange}
                 placeholder="Enter your snippet content... Use toolbar for formatting."

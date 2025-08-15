@@ -163,7 +163,7 @@ export const SimpleRichEditor: React.FC<SimpleRichEditorProps> = ({
       <div
         ref={editorRef}
         contentEditable
-        className="min-h-[120px] max-h-[300px] overflow-y-auto p-3 text-slate-100 focus:outline-none"
+        className="min-h-[120px] max-h-[300px] overflow-y-auto p-3 text-slate-100 focus:outline-none overflow-x-hidden"
         style={{
           wordBreak: 'break-word',
           whiteSpace: 'pre-wrap'

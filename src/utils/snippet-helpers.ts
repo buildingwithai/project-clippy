@@ -94,12 +94,14 @@ export function migrateSnippetToNewFormat(snippet: Snippet): Snippet {
 export function createNewVersion(
   snippet: Snippet, 
   newText: string, 
-  newHtml?: string
+  newHtml?: string,
+  newTitle?: string
 ): Snippet {
   const currentVersions = getAllVersions(snippet);
   const versionCount = currentVersions.length;
   const newVersion: SnippetVersion = {
     id: `version-${snippet.id}-${versionCount}`, // Generate sequential ID
+    title: newTitle, // Optional version-specific title
     text: newText,
     html: newHtml,
     createdAt: new Date().toISOString(),
