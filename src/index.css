@@ -44,3 +44,15 @@ body {
 .animate-spin-slow {
   animation: spin-slow 4s linear infinite;
 }
+
+/* Make popup root the positioning context for absolute tooltips */
+#root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* Prevent horizontal scrollbar in popup */
+html, body, #root {
+  overflow-x: hidden;
+}
