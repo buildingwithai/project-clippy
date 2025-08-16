@@ -79,6 +79,15 @@ const Overlay: React.FC = () => {
     }
   }, []);
 
+  // Signal to parent (background iframe host) that the React overlay is ready
+  useEffect(() => {
+    try {
+      window.parent.postMessage({ type: 'CLIPPY_OVERLAY_READY' }, '*');
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const isSearchingFolders = query.startsWith('/');
   const isSearchingTags = query.startsWith('#');
 

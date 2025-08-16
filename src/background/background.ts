@@ -1697,9 +1697,9 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
 });
 
 /**
- * CSP-safe overlay that injects DOM directly instead of using iframe
+ * Overlay toggle with iframe-first (React UI) and timed fallback to DOM modal
  */
-function toggleOverlay(originX?: number, originY?: number) {
+function toggleOverlay(originX?: number, originY?: number, forceDomFallback?: boolean) {
   const CONTAINER_ID = 'clippy-search-overlay-container';
 
   // If the overlay exists, remove it
@@ -1729,6 +1729,98 @@ function toggleOverlay(originX?: number, originY?: number) {
     transition: 'transform 200ms ease-out'
   });
 
+  // If not forcing DOM fallback, try to load the React overlay via iframe first
+  if (!forceDomFallback) {
+    const backdrop = document.createElement('div');
+    Object.assign(backdrop.style, {
+      position: 'fixed',
+      top: '0',
+      left: '0',
+      width: '100%',
+      height: '100%',
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'flex-start',
+      paddingTop: '80px',
+      background: 'transparent'
+    });
+
+    // Close handler
+    const closeOverlay = () => {
+      window.removeEventListener('message', onMessage);
+      document.removeEventListener('keydown', keypressHandler);
+      host.remove();
+      try { previouslyFocused?.focus(); } catch { /* no-op */ }
+    };
+
+    // Listen for READY/CLOSE messages from the React overlay
+    let reactReady = false;
+    const onMessage = (event: MessageEvent) => {
+      const data: any = event?.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'CLIPPY_OVERLAY_READY') {
+        reactReady = true;
+      } else if (data.type === 'CLOSE_CLIPPY_OVERLAY') {
+        closeOverlay();
+      }
+    };
+    window.addEventListener('message', onMessage);
+
+    // Esc to close
+    const keypressHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closeOverlay();
+      }
+    };
+    document.addEventListener('keydown', keypressHandler);
+
+    // Click outside (on backdrop) closes
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) closeOverlay();
+    });
+
+    // Build iframe pointing to the built overlay page
+    const iframe = document.createElement('iframe');
+    const hostName = location.hostname || '';
+    iframe.src = chrome.runtime.getURL('overlay/index.html') + `#host=${encodeURIComponent(hostName)}`;
+    Object.assign(iframe.style, {
+      width: '100%',
+      height: '100%',
+      border: '0',
+      background: 'transparent'
+    });
+    iframe.setAttribute('allow', 'clipboard-read; clipboard-write');
+
+    backdrop.appendChild(iframe);
+    host.appendChild(backdrop);
+    document.body.appendChild(host);
+
+    // Animate scale-in
+    requestAnimationFrame(() => {
+      host.style.transform = 'scale(1)';
+    });
+
+    // Timed fallback if React overlay cannot load due to CSP/frame restrictions
+    const FALLBACK_MS = 900; // keep snappy
+    const fallbackTimer = window.setTimeout(() => {
+      if (!reactReady) {
+        // Clean up iframe attempt and fall back to DOM modal
+        window.removeEventListener('message', onMessage);
+        document.removeEventListener('keydown', keypressHandler);
+        try { host.remove(); } catch { /* no-op */ }
+        // Invoke DOM modal path
+        toggleOverlay(originX, originY, true);
+      }
+    }, FALLBACK_MS);
+
+    // If the iframe loads and signals ready later, clear the timer
+    // Note: The READY signal is captured in onMessage handler above.
+    // We keep the timer to naturally expire only if not ready.
+
+    return; // Do not proceed to DOM path when trying iframe first
+  }
+
+  // DOM modal fallback path (used when iframe is blocked)
   // Create modal container
   const modalContainer = document.createElement('div');
   Object.assign(modalContainer.style, {
