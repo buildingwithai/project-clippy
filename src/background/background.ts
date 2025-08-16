@@ -1744,39 +1744,41 @@ function toggleOverlay(originX?: number, originY?: number) {
     background: 'transparent'
   });
 
-  // Create the modal box
+  // Create the modal box with dark animated theme
   const modal = document.createElement('div');
   Object.assign(modal.style, {
-    backgroundColor: 'white',
-    borderRadius: '8px',
-    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-    border: '1px solid #e5e7eb',
+    background: 'linear-gradient(135deg, #0f0f0f 0%, #000000 50%, #1a1a1a 100%)',
+    borderRadius: '16px',
+    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
     padding: '16px',
     width: '100%',
     maxWidth: '36rem',
-    margin: '0 16px'
+    margin: '0 16px',
+    position: 'relative',
+    overflow: 'hidden'
   });
 
   // Get hostname for domain chip
   const hostName = location.hostname || '';
   
-  // Create modal content
+  // Create modal content with dark theme
   modal.innerHTML = `
     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
       <div style="display: flex; align-items: center; gap: 8px;">
-        ${hostName ? `<span style="font-size: 0.75rem; background: #dbeafe; color: #1e40af; padding: 4px 8px; border-radius: 9999px;">${hostName}</span>` : ''}
+        ${hostName ? `<span style="font-size: 0.75rem; background: rgba(255, 255, 255, 0.1); color: white; padding: 4px 8px; border-radius: 9999px;">${hostName}</span>` : ''}
       </div>
-      <button id="clippy-close-btn" style="background: none; border: none; color: #6b7280; cursor: pointer; font-size: 18px; padding: 4px;">✕</button>
+      <button id="clippy-close-btn" style="background: none; border: none; color: rgba(255, 255, 255, 0.7); cursor: pointer; font-size: 18px; padding: 4px; transition: color 0.2s;">✕</button>
     </div>
-    <input id="clippy-search-input" type="text" placeholder="Search snippets, or use / for folders, # for tags..." style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 6px; outline: none; font-size: 14px; margin-bottom: 8px;">
+    <input id="clippy-search-input" type="text" placeholder="Search snippets, or use / for folders, # for tags..." style="width: 100%; padding: 12px; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 6px; outline: none; font-size: 14px; margin-bottom: 8px; background: rgba(0, 0, 0, 0.6); color: white; box-sizing: border-box;" placeholder-style="color: rgba(255, 255, 255, 0.4);">
     <div id="clippy-results" style="height: 288px; overflow-y: auto; margin-bottom: 8px;">
-      <div style="text-align: center; color: #6b7280; padding-top: 32px;">Loading snippets...</div>
+      <div style="text-align: center; color: rgba(255, 255, 255, 0.6); padding-top: 32px;">Loading snippets...</div>
     </div>
-    <div style="text-align: right; font-size: 0.75rem; color: #6b7280;">
-      Use <kbd style="margin: 0 2px; padding: 2px 6px; font-weight: 600; color: #374151; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px;">↑</kbd>
-      <kbd style="margin: 0 2px; padding: 2px 6px; font-weight: 600; color: #374151; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px;">↓</kbd> to navigate,
-      <kbd style="margin: 0 2px; padding: 2px 6px; font-weight: 600; color: #374151; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px;">Enter</kbd> to select, and
-      <kbd style="margin: 0 2px; padding: 2px 6px; font-weight: 600; color: #374151; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px;">Esc</kbd> to close.
+    <div style="text-align: right; font-size: 0.75rem; color: rgba(255, 255, 255, 0.6);">
+      Use <kbd style="margin: 0 2px; padding: 2px 6px; font-weight: 600; color: white; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px;">↑</kbd>
+      <kbd style="margin: 0 2px; padding: 2px 6px; font-weight: 600; color: white; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px;">↓</kbd> to navigate,
+      <kbd style="margin: 0 2px; padding: 2px 6px; font-weight: 600; color: white; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px;">Enter</kbd> to select, and
+      <kbd style="margin: 0 2px; padding: 2px 6px; font-weight: 600; color: white; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px;">Esc</kbd> to close.
     </div>
   `;
 
@@ -1812,15 +1814,15 @@ function toggleOverlay(originX?: number, originY?: number) {
   // Search functionality
   const renderResults = (results: any[]) => {
     if (results.length === 0) {
-      resultsDiv.innerHTML = '<div style="text-align: center; color: #6b7280; padding-top: 32px;">No results found.</div>';
+      resultsDiv.innerHTML = '<div style="text-align: center; color: rgba(255, 255, 255, 0.6); padding-top: 32px;">No results found.</div>';
       return;
     }
     
     resultsDiv.innerHTML = results.map((snippet, index) => `
-      <div class="clippy-result" data-index="${index}" style="padding: 12px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 12px; ${index === selectedIndex ? 'background: #dbeafe;' : ''}">
+      <div class="clippy-result" data-index="${index}" style="padding: 12px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: background-color 0.2s; ${index === selectedIndex ? 'background: rgba(255, 255, 255, 0.1);' : ''}">
         <div style="flex-grow: 1; min-width: 0;">
-          <div style="font-weight: bold; color: #374151; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${snippet.title || snippet.text.substring(0, 60)}</div>
-          <div style="font-size: 0.875rem; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${snippet.text}</div>
+          <div style="font-weight: bold; color: white; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${snippet.title || snippet.text.substring(0, 60)}</div>
+          <div style="font-size: 0.875rem; color: rgba(255, 255, 255, 0.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${snippet.text}</div>
         </div>
       </div>
     `).join('');
@@ -1830,10 +1832,10 @@ function toggleOverlay(originX?: number, originY?: number) {
       const baseSelected = index === selectedIndex;
       el.addEventListener('click', () => selectSnippet(results[index]));
       el.addEventListener('mouseenter', () => {
-        (el as HTMLElement).style.background = '#f3f4f6';
+        (el as HTMLElement).style.background = 'rgba(255, 255, 255, 0.05)';
       });
       el.addEventListener('mouseleave', () => {
-        (el as HTMLElement).style.background = baseSelected ? '#dbeafe' : 'transparent';
+        (el as HTMLElement).style.background = baseSelected ? 'rgba(255, 255, 255, 0.1)' : 'transparent';
       });
     });
   };
