@@ -1362,7 +1362,8 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
       sendResponse?.({ success: false, error: String(err) });
     }
     return true; // async response
-  } else if (request.type === 'PASTE_SNIPPET' && sender.origin === chrome.runtime.getURL('').slice(0, -1)) {
+  } else if (request.type === 'PASTE_SNIPPET') {
+    // Accept paste requests from content/overlay context
     handlePasteRequest(request.snippet);
   } else if (request.type === 'PASTE_SNIPPET_BY_ID') {
     const { snippetId } = request;
@@ -1446,8 +1447,6 @@ async function handlePasteRequest(snippet: Snippet, isHotkey = false) {
   let success = injectionResults.some((r: chrome.scripting.InjectionResult) => r.result === true);
   console.log('[Clippy] Initial paste success evaluation:', success);
   
-  // Track whether either paste or clipboard fallback succeeds
-  let pasteOrCopySucceeded = success;
   if (!success) {
     console.log('[Clippy] Debug paste unsuccessful in all frames. Trying legacy paste method...');
     const legacyResults = await chrome.scripting.executeScript({
@@ -1468,7 +1467,6 @@ async function handlePasteRequest(snippet: Snippet, isHotkey = false) {
     try {
       await copyToClipboardAndNotify(sanitizedText, 'Copied to clipboard! Paste with Ctrl+V');
       console.log('[Clippy] Successfully copied to clipboard as fallback');
-      pasteOrCopySucceeded = true;
     } catch (clipboardError) {
       console.error('[Clippy] Both paste and clipboard fallback failed:', clipboardError);
       console.error('[Clippy] Clipboard error details:', clipboardError instanceof Error ? clipboardError.message : String(clipboardError));
@@ -1488,46 +1486,6 @@ async function handlePasteRequest(snippet: Snippet, isHotkey = false) {
       // REMOVED: Automatic URL navigation - this was causing the unwanted redirects
       // The extension should never automatically navigate to URLs without explicit user intent
     }
-  }
-
-  // Update usage statistics (global + per-domain) when we successfully paste or copy
-  try {
-    if (pasteOrCopySucceeded) {
-      const now = new Date().toISOString();
-      // Derive base domain from active tab URL
-      const baseDomain = (() => {
-        try {
-          const u = tab.url ? new URL(tab.url) : null;
-          if (!u) return '';
-          const parts = u.hostname.split('.');
-          return parts.length <= 2 ? u.hostname : parts.slice(-2).join('.');
-        } catch { return ''; }
-      })();
-
-      const store = await chrome.storage.local.get(['snippets', 'usageByDomain']);
-      const allSnippets: Snippet[] = store.snippets || [];
-      const usageByDomain: Record<string, Record<string, { frequency: number; lastUsed: string }>> = store.usageByDomain || {};
-
-      // Update global snippet usage
-      const idx = allSnippets.findIndex(s => s.id === snippet.id);
-      if (idx !== -1) {
-        const current = allSnippets[idx];
-        const nextFrequency = (current.frequency || 0) + 1;
-        allSnippets[idx] = { ...current, lastUsed: now, frequency: nextFrequency } as Snippet;
-      }
-
-      // Update per-domain usage
-      if (baseDomain) {
-        usageByDomain[baseDomain] = usageByDomain[baseDomain] || {};
-        const prev = usageByDomain[baseDomain][snippet.id] || { frequency: 0, lastUsed: now };
-        usageByDomain[baseDomain][snippet.id] = { frequency: (prev.frequency || 0) + 1, lastUsed: now };
-      }
-
-      await chrome.storage.local.set({ snippets: allSnippets, usageByDomain });
-      console.log('[Clippy] Updated usage stats', { baseDomain, snippetId: snippet.id });
-    }
-  } catch (usageErr) {
-    console.warn('[Clippy] Failed to update usage stats', usageErr);
   }
 }
 
@@ -1751,6 +1709,9 @@ function toggleOverlay(originX?: number, originY?: number) {
     return;
   }
 
+  // Remember currently focused element to restore on close
+  const previouslyFocused = document.activeElement as (HTMLElement | null);
+
   // Create the host container
   const host = document.createElement('div');
   host.id = CONTAINER_ID;
@@ -1830,71 +1791,22 @@ function toggleOverlay(originX?: number, originY?: number) {
   
   let snippets: any[] = [];
   let selectedIndex = 0;
-  // Domain-aware ranking state
-  const baseDomain = (() => {
-    try {
-      const hn = location.hostname || '';
-      const parts = hn.split('.');
-      return parts.length <= 2 ? hn : parts.slice(-2).join('.');
-    } catch {
-      return location.hostname || '';
-    }
-  })();
-  let usageMap: Record<string, Record<string, { frequency: number; lastUsed: string }>> = {};
-
-  // Comparator prioritizes per-domain usage, then global usage, then recency and creation
-  const comparator = (a: any, b: any) => {
-    const du = usageMap[baseDomain] || {};
-    const aDU = du[a.id];
-    const bDU = du[b.id];
-    const aHasDU = aDU ? 1 : 0;
-    const bHasDU = bDU ? 1 : 0;
-
-    if (aHasDU !== bHasDU) return bHasDU - aHasDU;
-
-    const aDF = aDU?.frequency || 0;
-    const bDF = bDU?.frequency || 0;
-    if (aDF !== bDF) return bDF - aDF;
-
-    const aDL = aDU?.lastUsed ? Date.parse(aDU.lastUsed) || 0 : 0;
-    const bDL = bDU?.lastUsed ? Date.parse(bDU.lastUsed) || 0 : 0;
-    if (aDL !== bDL) return bDL - aDL;
-
-    const aGF = a.frequency || 0;
-    const bGF = b.frequency || 0;
-    if (aGF !== bGF) return bGF - aGF;
-
-    const aGL = a.lastUsed ? Date.parse(a.lastUsed) || 0 : 0;
-    const bGL = b.lastUsed ? Date.parse(b.lastUsed) || 0 : 0;
-    if (aGL !== bGL) return bGL - aGL;
-
-    const aC = a.createdAt ? Date.parse(a.createdAt) || 0 : 0;
-    const bC = b.createdAt ? Date.parse(b.createdAt) || 0 : 0;
-    if (aC !== bC) return bC - aC;
-
-    // Stable fallback by title then id
-    const aT = (a.title || '').toString().toLowerCase();
-    const bT = (b.title || '').toString().toLowerCase();
-    if (aT !== bT) return aT < bT ? -1 : 1;
-    return (a.id || '').toString() < (b.id || '').toString() ? -1 : 1;
-  };
 
   // Close handlers
   const closeOverlay = () => {
     if (keypressHandler) document.removeEventListener('keydown', keypressHandler);
     host.remove();
+    try { previouslyFocused?.focus(); } catch { /* no-op */ }
   };
   closeBtn?.addEventListener('click', closeOverlay);
   modalContainer.addEventListener('click', (e) => {
     if (e.target === modalContainer) closeOverlay();
   });
 
-  // Load snippets and usage stats for ranking
-  chrome.storage.local.get(['snippets', 'usageByDomain'], (result) => {
-    usageMap = (result.usageByDomain || {}) as Record<string, Record<string, { frequency: number; lastUsed: string }>>;
+  // Load snippets
+  chrome.storage.local.get(['snippets'], (result) => {
     snippets = result.snippets || [];
-    const initial = [...snippets].sort(comparator);
-    renderResults(initial);
+    renderResults(snippets);
   });
 
   // Search functionality
@@ -1927,18 +1839,20 @@ function toggleOverlay(originX?: number, originY?: number) {
   };
 
   const selectSnippet = (snippet: any) => {
-    chrome.runtime.sendMessage({ type: 'PASTE_SNIPPET', snippet });
+    // Close first to restore focus to the previously active input/contenteditable
     closeOverlay();
+    // Defer paste slightly to allow focus restoration to take effect
+    setTimeout(() => {
+      chrome.runtime.sendMessage({ type: 'PASTE_SNIPPET', snippet });
+    }, 50);
   };
 
   const filterResults = () => {
     const query = searchInput.value.toLowerCase();
-    const filtered = snippets
-      .filter(s => 
-        s.title?.toLowerCase().includes(query) || 
-        s.text.toLowerCase().includes(query)
-      )
-      .sort(comparator);
+    const filtered = snippets.filter(s => 
+      s.title?.toLowerCase().includes(query) || 
+      s.text.toLowerCase().includes(query)
+    );
     selectedIndex = 0;
     renderResults(filtered);
   };
