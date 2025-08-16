@@ -1324,6 +1324,44 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     console.log('[Clippy] Updating context menu from settings change');
     updatePasteContextMenu();
     sendResponse({ success: true });
+  } else if (request.action === 'toggleOverlayNow') {
+    try {
+      console.log('[Clippy] Received toggleOverlayNow from content', { originX: request.originX, originY: request.originY });
+      // Prevent injection on special pages
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (activeTab?.url?.startsWith('chrome://') || activeTab?.url?.startsWith('chrome-extension://') || activeTab?.url?.startsWith('chrome.google.com/webstore')) {
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon48.png'),
+          title: 'Clippy Action',
+          message: 'Clippy cannot be used on this page.'
+        });
+        sendResponse?.({ success: false, error: 'Restricted page' });
+        return true;
+      }
+      const tabId = sender.tab?.id;
+      if (!tabId) {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.id) {
+          sendResponse?.({ success: false, error: 'No active tab' });
+          return true;
+        }
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: toggleOverlay, args: [request.originX, request.originY] });
+      } else {
+        await chrome.scripting.executeScript({ target: { tabId }, func: toggleOverlay, args: [request.originX, request.originY] });
+      }
+      sendResponse?.({ success: true });
+    } catch (err) {
+      console.error('Failed to toggle overlay from message:', err);
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon48.png'),
+        title: 'Clippy Overlay',
+        message: 'Could not open overlay on this page. Check extension permissions in chrome://extensions and try reloading the page.'
+      });
+      sendResponse?.({ success: false, error: String(err) });
+    }
+    return true; // async response
   } else if (request.type === 'PASTE_SNIPPET' && sender.origin === chrome.runtime.getURL('').slice(0, -1)) {
     handlePasteRequest(request.snippet);
   } else if (request.type === 'PASTE_SNIPPET_BY_ID') {
@@ -1658,54 +1696,197 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
 });
 
 /**
- * Injected into the active page to toggle the search overlay.
- * This function creates a host element, attaches a shadow DOM, and injects an
- * iframe pointing to the React-based overlay application.
+ * CSP-safe overlay that injects DOM directly instead of using iframe
  */
-function toggleOverlay() {
+function toggleOverlay(originX?: number, originY?: number) {
   const CONTAINER_ID = 'clippy-search-overlay-container';
 
-  // If the overlay exists, remove it and focus the body
+  // If the overlay exists, remove it
   const existingContainer = document.getElementById(CONTAINER_ID);
   if (existingContainer) {
     existingContainer.remove();
-    window.focus(); // Return focus to the main page
     return;
   }
 
-  // Create the host container for the shadow DOM
+  // Create the host container
   const host = document.createElement('div');
   host.id = CONTAINER_ID;
-  document.body.appendChild(host);
-
-  // Create a shadow root
-  const shadowRoot = host.attachShadow({ mode: 'open' });
-
-  // Create the iframe that will host the React app
-  const iframe = document.createElement('iframe');
-  iframe.src = chrome.runtime.getURL('overlay/index.html');
-  Object.assign(iframe.style, {
-    width: '100vw',
-    height: '100vh',
-    border: 'none',
+  Object.assign(host.style, {
     position: 'fixed',
     top: '0',
     left: '0',
+    width: '100vw',
+    height: '100vh',
     zIndex: '2147483647',
+    background: 'transparent',
+    pointerEvents: 'auto',
+    transformOrigin: (originX != null && originY != null) ? `${originX}px ${originY}px` : '50% 20%',
+    transform: 'scale(0.3)',
+    transition: 'transform 200ms ease-out'
   });
 
-  // Append the iframe to the shadow root
-  shadowRoot.appendChild(iframe);
+  // Create modal container
+  const modalContainer = document.createElement('div');
+  Object.assign(modalContainer.style, {
+    position: 'fixed',
+    top: '0',
+    left: '0',
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingTop: '80px',
+    background: 'transparent'
+  });
 
-  // Add a listener to remove the overlay when a message is received from the iframe
-  const messageListener = (event: MessageEvent) => {
-    if (event.source === iframe.contentWindow && event.data.type === 'CLOSE_CLIPPY_OVERLAY') {
-      host.remove();
-      window.removeEventListener('message', messageListener);
+  // Create the modal box
+  const modal = document.createElement('div');
+  Object.assign(modal.style, {
+    backgroundColor: 'white',
+    borderRadius: '8px',
+    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+    border: '1px solid #e5e7eb',
+    padding: '16px',
+    width: '100%',
+    maxWidth: '36rem',
+    margin: '0 16px'
+  });
+
+  // Get hostname for domain chip
+  const hostName = location.hostname || '';
+  
+  // Create modal content
+  modal.innerHTML = `
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        ${hostName ? `<span style="font-size: 0.75rem; background: #dbeafe; color: #1e40af; padding: 4px 8px; border-radius: 9999px;">${hostName}</span>` : ''}
+      </div>
+      <button id="clippy-close-btn" style="background: none; border: none; color: #6b7280; cursor: pointer; font-size: 18px; padding: 4px;">✕</button>
+    </div>
+    <input id="clippy-search-input" type="text" placeholder="Search snippets, or use / for folders, # for tags..." style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 6px; outline: none; font-size: 14px; margin-bottom: 8px;">
+    <div id="clippy-results" style="height: 288px; overflow-y: auto; margin-bottom: 8px;">
+      <div style="text-align: center; color: #6b7280; padding-top: 32px;">Loading snippets...</div>
+    </div>
+    <div style="text-align: right; font-size: 0.75rem; color: #6b7280;">
+      Use <kbd style="margin: 0 2px; padding: 2px 6px; font-weight: 600; color: #374151; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px;">↑</kbd>
+      <kbd style="margin: 0 2px; padding: 2px 6px; font-weight: 600; color: #374151; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px;">↓</kbd> to navigate,
+      <kbd style="margin: 0 2px; padding: 2px 6px; font-weight: 600; color: #374151; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px;">Enter</kbd> to select, and
+      <kbd style="margin: 0 2px; padding: 2px 6px; font-weight: 600; color: #374151; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px;">Esc</kbd> to close.
+    </div>
+  `;
+
+  modalContainer.appendChild(modal);
+  host.appendChild(modalContainer);
+  document.body.appendChild(host);
+
+  // Event handlers
+  const closeBtn = modal.querySelector('#clippy-close-btn') as HTMLButtonElement;
+  const searchInput = modal.querySelector('#clippy-search-input') as HTMLInputElement;
+  const resultsDiv = modal.querySelector('#clippy-results') as HTMLDivElement;
+  
+  let snippets: any[] = [];
+  let selectedIndex = 0;
+
+  // Close handlers
+  const closeOverlay = () => {
+    if (keypressHandler) document.removeEventListener('keydown', keypressHandler);
+    host.remove();
+  };
+  closeBtn?.addEventListener('click', closeOverlay);
+  modalContainer.addEventListener('click', (e) => {
+    if (e.target === modalContainer) closeOverlay();
+  });
+
+  // Load snippets
+  chrome.storage.local.get(['snippets'], (result) => {
+    snippets = result.snippets || [];
+    renderResults(snippets);
+  });
+
+  // Search functionality
+  const renderResults = (results: any[]) => {
+    if (results.length === 0) {
+      resultsDiv.innerHTML = '<div style="text-align: center; color: #6b7280; padding-top: 32px;">No results found.</div>';
+      return;
     }
+    
+    resultsDiv.innerHTML = results.map((snippet, index) => `
+      <div class="clippy-result" data-index="${index}" style="padding: 12px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 12px; ${index === selectedIndex ? 'background: #dbeafe;' : ''}">
+        <div style="flex-grow: 1; min-width: 0;">
+          <div style="font-weight: bold; color: #374151; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${snippet.title || snippet.text.substring(0, 60)}</div>
+          <div style="font-size: 0.875rem; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${snippet.text}</div>
+        </div>
+      </div>
+    `).join('');
+
+    // Add event handlers (click + hover) without inline attributes (CSP-safe)
+    resultsDiv.querySelectorAll('.clippy-result').forEach((el, index) => {
+      const baseSelected = index === selectedIndex;
+      el.addEventListener('click', () => selectSnippet(results[index]));
+      el.addEventListener('mouseenter', () => {
+        (el as HTMLElement).style.background = '#f3f4f6';
+      });
+      el.addEventListener('mouseleave', () => {
+        (el as HTMLElement).style.background = baseSelected ? '#dbeafe' : 'transparent';
+      });
+    });
   };
 
-  window.addEventListener('message', messageListener);
+  const selectSnippet = (snippet: any) => {
+    chrome.runtime.sendMessage({ type: 'PASTE_SNIPPET', snippet });
+    closeOverlay();
+  };
+
+  const filterResults = () => {
+    const query = searchInput.value.toLowerCase();
+    const filtered = snippets.filter(s => 
+      s.title?.toLowerCase().includes(query) || 
+      s.text.toLowerCase().includes(query)
+    );
+    selectedIndex = 0;
+    renderResults(filtered);
+  };
+
+  // Keyboard navigation
+  const keypressHandler = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      closeOverlay();
+      return;
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      selectedIndex = Math.min(selectedIndex + 1, snippets.length - 1);
+      renderResults(snippets.filter(s => 
+        s.title?.toLowerCase().includes(searchInput.value.toLowerCase()) || 
+        s.text.toLowerCase().includes(searchInput.value.toLowerCase())
+      ));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      selectedIndex = Math.max(selectedIndex - 1, 0);
+      renderResults(snippets.filter(s => 
+        s.title?.toLowerCase().includes(searchInput.value.toLowerCase()) || 
+        s.text.toLowerCase().includes(searchInput.value.toLowerCase())
+      ));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const filtered = snippets.filter(s => 
+        s.title?.toLowerCase().includes(searchInput.value.toLowerCase()) || 
+        s.text.toLowerCase().includes(searchInput.value.toLowerCase())
+      );
+      if (filtered[selectedIndex]) {
+        selectSnippet(filtered[selectedIndex]);
+      }
+    }
+  };
+  document.addEventListener('keydown', keypressHandler);
+
+  searchInput?.addEventListener('input', filterResults);
+  searchInput?.focus();
+
+  // Animation
+  requestAnimationFrame(() => {
+    host.style.transform = 'scale(1)';
+  });
 }
 
 console.log('Background script loaded. Context menus initialized.');

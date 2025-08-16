@@ -37,10 +37,10 @@
   "commands": {
     "toggle-overlay": {
       "suggested_key": {
-        "default": "Alt+Shift+V",
-        "windows": "Alt+Shift+V",
-        "mac": "Alt+Shift+V",
-        "linux": "Alt+Shift+V"
+        "default": "Ctrl+Shift+Space",
+        "windows": "Ctrl+Shift+Space",
+        "mac": "Command+Shift+Space",
+        "linux": "Ctrl+Shift+Space"
       },
       "description": "Open Clippy quick search"
     }

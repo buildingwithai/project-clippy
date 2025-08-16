@@ -11,6 +11,9 @@
     "alarms",
     "notifications"
   ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -62,5 +65,16 @@
       },
       "description": "Activate snippet hotkey 4"
     }
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/overlay/index.html",
+        "overlay/overlay.js",
+        "assets/*",
+        "icons/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

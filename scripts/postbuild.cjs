@@ -6,6 +6,12 @@ const oldHtmlPath = path.join(distDir, 'src/popup/index.html');
 const newPopupDir = path.join(distDir, 'popup');
 const newHtmlPath = path.join(newPopupDir, 'index.html');
 const oldSrcPopupDir = path.join(distDir, 'src/popup');
+
+// Overlay paths
+const oldOverlayHtmlPath = path.join(distDir, 'src/overlay/index.html');
+const newOverlayDir = path.join(distDir, 'overlay');
+const newOverlayHtmlPath = path.join(newOverlayDir, 'index.html');
+const oldSrcOverlayDir = path.join(distDir, 'src/overlay');
 const oldSrcDir = path.join(distDir, 'src');
 
 function ensureDirSync(dirPath) {
@@ -41,9 +47,28 @@ async function postBuild() {
           console.log(`[PostBuild] Directory ${oldSrcDir} is not empty, not removing.`);
         }
       }
+    } else {
+      console.log(`[PostBuild] ${oldHtmlPath} not found. No action taken for popup.`);
+    }
+
+    // Handle overlay HTML move
+    if (fs.existsSync(oldOverlayHtmlPath)) {
+      ensureDirSync(newOverlayDir);
+      fs.renameSync(oldOverlayHtmlPath, newOverlayHtmlPath);
+      console.log(`[PostBuild] Moved ${oldOverlayHtmlPath} to ${newOverlayHtmlPath}`);
+
+      // Clean up old overlay dir if empty
+      if (fs.existsSync(oldSrcOverlayDir)) {
+        const filesInOldSrcOverlayDir = fs.readdirSync(oldSrcOverlayDir);
+        if (filesInOldSrcOverlayDir.length === 0) {
+          fs.rmdirSync(oldSrcOverlayDir);
+          console.log(`[PostBuild] Removed empty directory: ${oldSrcOverlayDir}`);
+        }
+      }
+
       console.log('[PostBuild] Script finished successfully.');
     } else {
-      console.log(`[PostBuild] ${oldHtmlPath} not found. No action taken.`);
+      console.log(`[PostBuild] ${oldOverlayHtmlPath} not found. No action taken for overlay.`);
     }
   } catch (error) {
     console.error('[PostBuild] Error during post-build script:', error);

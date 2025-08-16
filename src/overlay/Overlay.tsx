@@ -6,6 +6,7 @@ const Overlay: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [query, setQuery] = useState('');
+  const [host, setHost] = useState<string | null>(null);
   const [snippets, setSnippets] = useState<Snippet[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [activeFolder, setActiveFolder] = useState<Folder | null>(null);
@@ -16,6 +17,17 @@ const Overlay: React.FC = () => {
       setSnippets((result.snippets as Snippet[]) || []);
       setFolders((result.folders as Folder[]) || []);
     });
+  }, []);
+
+  // Read host passed via hash (e.g., #host=example.com)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      const h = params.get('host');
+      if (h) setHost(h);
+    } catch {
+      // ignore
+    }
   }, []);
 
   const isSearchingFolders = query.startsWith('/');
@@ -94,8 +106,37 @@ const Overlay: React.FC = () => {
   }, []);
 
   return (
-    <div ref={overlayRef} onClick={(e) => e.target === overlayRef.current && requestClose()} className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-start pt-20 z-50">
-      <div className="bg-white rounded-lg shadow-xl p-4 w-full max-w-xl mx-4">
+    <div ref={overlayRef} onClick={(e) => e.target === overlayRef.current && requestClose()} style={{ 
+      position: 'fixed', 
+      top: 0, 
+      left: 0, 
+      right: 0, 
+      bottom: 0, 
+      background: 'transparent',
+      backgroundColor: 'transparent',
+      zIndex: 50,
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'flex-start',
+      paddingTop: '80px'
+    }}>
+      <div className="modal-content bg-white rounded-lg shadow-2xl border border-gray-200 p-4 w-full max-w-xl mx-4">
+        {/* Header: domain chip and close */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            {host && (
+              <span aria-label="Current domain" className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+                {host}
+              </span>
+            )}
+            {activeFolder && (
+              <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded-full">
+                {activeFolder.emoji} {activeFolder.name}
+              </span>
+            )}
+          </div>
+          <button aria-label="Close" onClick={requestClose} className="text-gray-500 hover:text-gray-800">✕</button>
+        </div>
         {activeFolder && (
           <div className="flex items-center gap-2 mb-2 text-sm text-gray-600">
             <button onClick={() => { setActiveFolder(null); setQuery(''); }} className="hover:bg-gray-200 p-1 rounded">←</button>
