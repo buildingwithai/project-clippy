@@ -10,7 +10,6 @@ permissions:
   contents: read
   issues: write
   pull-requests: write
-  projects: write
 
 jobs:
   issue_to_planned:
@@ -64,15 +63,43 @@ jobs:
             }
             const plannedOpt = statusField.options.find(o => /planned/i.test(o.name)) || statusField.options[0];
 
-            const addRes = await github.graphql(`
-              mutation($projectId: ID!, $contentId: ID!) {
-                addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
-                  item { id }
+            let itemId = null;
+            try {
+              const addRes = await github.graphql(`
+                mutation($projectId: ID!, $contentId: ID!) {
+                  addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                    item { id }
+                  }
                 }
+              `, { projectId: project.id, contentId: issueNodeId });
+              itemId = addRes.addProjectV2ItemById.item.id;
+            } catch (e) {
+              core.warning(`Issue addProjectV2ItemById failed (possibly already added): ${e?.errors?.[0]?.message || e.message}`);
+              // Lookup existing item for this issue
+              const issueNumber = context.payload.issue.number;
+              try {
+                const lookup = await github.graphql(`
+                  query($owner: String!, $repo: String!, $number: Int!) {
+                    repository(owner: $owner, name: $repo) {
+                      issue(number: $number) {
+                        projectItems(first: 20) { nodes { id project { id } } }
+                      }
+                    }
+                  }
+                `, { owner: context.repo.owner, repo: context.repo.repo, number: issueNumber });
+                const nodes = lookup?.repository?.issue?.projectItems?.nodes || [];
+                const match = nodes.find(n => n?.project?.id === project.id);
+                if (match?.id) {
+                  itemId = match.id;
+                } else {
+                  core.setFailed('Issue project item not found for Status update.');
+                  return;
+                }
+              } catch (qe) {
+                core.setFailed(`Issue project item lookup failed: ${qe.message}`);
+                return;
               }
-            `, { projectId: project.id, contentId: issueNodeId });
-
-            const itemId = addRes.addProjectV2ItemById.item.id;
+            }
 
             await github.graphql(`
               mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
@@ -137,14 +164,43 @@ jobs:
             const doneOpt = statusField.options.find(o => /done|completed/i.test(o.name)) || statusField.options[0];
 
             // Ensure PR exists as an item
-            const addRes = await github.graphql(`
-              mutation($projectId: ID!, $contentId: ID!) {
-                addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
-                  item { id }
+            let prItemId = null;
+            try {
+              const addRes = await github.graphql(`
+                mutation($projectId: ID!, $contentId: ID!) {
+                  addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                    item { id }
+                  }
                 }
+              `, { projectId: project.id, contentId: prNodeId });
+              prItemId = addRes.addProjectV2ItemById.item.id;
+            } catch (e) {
+              core.warning(`PR addProjectV2ItemById failed (possibly already added): ${e?.errors?.[0]?.message || e.message}`);
+              // Lookup existing item for this PR
+              const prNumber = context.payload.pull_request.number;
+              try {
+                const lookup = await github.graphql(`
+                  query($owner: String!, $repo: String!, $number: Int!) {
+                    repository(owner: $owner, name: $repo) {
+                      pullRequest(number: $number) {
+                        projectItems(first: 20) { nodes { id project { id } } }
+                      }
+                    }
+                  }
+                `, { owner: context.repo.owner, repo: context.repo.repo, number: prNumber });
+                const nodes = lookup?.repository?.pullRequest?.projectItems?.nodes || [];
+                const match = nodes.find(n => n?.project?.id === project.id);
+                if (match?.id) {
+                  prItemId = match.id;
+                } else {
+                  core.setFailed('PR project item not found for Status update.');
+                  return;
+                }
+              } catch (qe) {
+                core.setFailed(`PR project item lookup failed: ${qe.message}`);
+                return;
               }
-            `, { projectId: project.id, contentId: prNodeId });
-            const prItemId = addRes.addProjectV2ItemById.item.id;
+            }
 
             const isMerged = context.payload.action === 'closed' && pr.merged === true;
             const targetOption = isMerged ? doneOpt : inProgressOpt;
@@ -183,14 +239,42 @@ jobs:
                 issue_number: issueNumber,
               });
               const nodeId = issue.data.node_id;
-              const addIssueRes = await github.graphql(`
-                mutation($projectId: ID!, $contentId: ID!) {
-                  addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
-                    item { id }
+              let issueItemId = null;
+              try {
+                const addIssueRes = await github.graphql(`
+                  mutation($projectId: ID!, $contentId: ID!) {
+                    addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                      item { id }
+                    }
                   }
+                `, { projectId: project.id, contentId: nodeId });
+                issueItemId = addIssueRes.addProjectV2ItemById.item.id;
+              } catch (e) {
+                core.warning(`Linked issue add failed (possibly already added): ${e?.errors?.[0]?.message || e.message}`);
+                // Lookup existing linked issue item
+                try {
+                  const linkLookup = await github.graphql(`
+                    query($owner: String!, $repo: String!, $number: Int!) {
+                      repository(owner: $owner, name: $repo) {
+                        issue(number: $number) {
+                          projectItems(first: 20) { nodes { id project { id } } }
+                        }
+                      }
+                    }
+                  `, { owner: context.repo.owner, repo: context.repo.repo, number: issueNumber });
+                  const nodes = linkLookup?.repository?.issue?.projectItems?.nodes || [];
+                  const match = nodes.find(n => n?.project?.id === project.id);
+                  if (match?.id) {
+                    issueItemId = match.id;
+                  } else {
+                    core.warning(`Linked issue project item not found for #${issueNumber}; skipping.`);
+                    continue;
+                  }
+                } catch (qe) {
+                  core.warning(`Linked issue item lookup failed for #${issueNumber}: ${qe.message}`);
+                  continue;
                 }
-              `, { projectId: project.id, contentId: nodeId });
-              const issueItemId = addIssueRes.addProjectV2ItemById.item.id;
+              }
 
               await github.graphql(`
                 mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
