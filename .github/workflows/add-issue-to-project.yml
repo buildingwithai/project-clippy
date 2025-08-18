@@ -1,0 +1,108 @@
+name: Add Existing Issue to Project
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to add"
+        required: true
+        type: string
+      status:
+        description: "Status option to set (default: Planned)"
+        required: false
+        default: "Planned"
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+  projects: write
+
+jobs:
+  add_issue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve Issue node id
+        id: res
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = parseInt(core.getInput('issue_number'), 10);
+            const { data } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+            });
+            core.setOutput('node_id', data.node_id);
+      - name: Add Issue to Project and set Status
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const ownerLogin = 'buildingwithai';
+            const projectNumber = 1; // https://github.com/users/buildingwithai/projects/1
+            const desiredStatus = core.getInput('status') || 'Planned';
+
+            const contentId = '${{ steps.res.outputs.node_id }}';
+
+            const projectData = await github.graphql(`
+              query($login: String!, $number: Int!) {
+                user(login: $login) {
+                  projectV2(number: $number) {
+                    id
+                    title
+                    fields(first: 50) {
+                      nodes {
+                        ... on ProjectV2FieldCommon { id name }
+                        ... on ProjectV2SingleSelectField { id name options { id name } }
+                      }
+                    }
+                  }
+                }
+              }
+            `, { login: ownerLogin, number: projectNumber });
+
+            const project = projectData.user.projectV2;
+            if (!project) {
+              core.setFailed('Project not found');
+              return;
+            }
+            core.notice(`Project title: ${project.title}`);
+
+            const statusField = project.fields.nodes.find(f => f.name === 'Status' && f.options);
+            if (!statusField) {
+              core.setFailed('Status field not found in Project');
+              return;
+            }
+            const option = statusField.options.find(o => o.name.toLowerCase() === desiredStatus.toLowerCase());
+            if (!option) {
+              core.setFailed(`Status option not found: ${desiredStatus}`);
+              return;
+            }
+
+            const addRes = await github.graphql(`
+              mutation($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                  item { id }
+                }
+              }
+            `, { projectId: project.id, contentId });
+            const itemId = addRes.addProjectV2ItemById.item.id;
+
+            await github.graphql(`
+              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $projectId,
+                  itemId: $itemId,
+                  fieldId: $fieldId,
+                  value: { singleSelectOptionId: $optionId }
+                }) { clientMutationId }
+              }
+            `, {
+              projectId: project.id,
+              itemId,
+              fieldId: statusField.id,
+              optionId: option.id,
+            });
+            core.notice(`Added issue to project and set Status=${desiredStatus}`);
