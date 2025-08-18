@@ -25,6 +25,8 @@ export interface Snippet {
   sortOrder?: number; // Optional: Custom sort order for drag and drop reordering
   versions: SnippetVersion[]; // Array of ALL versions (including current) - required
   currentVersionIndex: number; // Index of the currently active version (default: 0)
+  sourceUrl?: string; // Optional: Full URL where this snippet was captured from
+  sourceDomain?: string; // Optional: Domain extracted from sourceUrl (e.g., "github.com")
 }
 
 export interface Folder {

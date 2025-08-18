@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { CustomTooltip } from '@/components/ui/custom-tooltip';
 import { VersionCarousel } from '@/components/ui/version-carousel';
 import { HotkeyBadge } from '@/components/ui/hotkey-badge';
+import { FaviconBadge } from '@/components/ui/favicon-badge';
+import { HamburgerMenu } from '@/components/ui/hamburger-menu';
 import { cn } from '@/lib/utils';
 import { formatDateToMD, formatCount } from '@/utils/format';
 import type { Snippet } from '@/utils/types';
@@ -54,35 +56,19 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
       )}
     >
       <div className="flex justify-between items-start mb-1">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-1">
           <h3 className="text-md font-semibold text-sky-400">{snippet.title || 'Untitled Snippet'}</h3>
           {hotkeyShortcut && (
             <HotkeyBadge hotkey={hotkeyShortcut} />
           )}
         </div>
         <div className="flex items-center space-x-1">
-          <CustomTooltip content={snippet.isPinned ? 'Unpin Snippet' : 'Pin Snippet'} side="left">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-slate-400 hover:text-yellow-400"
-              onClick={() => onPinSnippet(snippet.id)}
-            >
-              <Star size={14} className={cn(snippet.isPinned && 'text-yellow-400 fill-yellow-400')} />
-            </Button>
-          </CustomTooltip>
-          <CustomTooltip content="Edit" side="left-close">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-slate-400 hover:text-blue-400"
-              onClick={() => onOpenEditModal(snippet)}
-              aria-label="Edit snippet"
-            >
-              <Edit3 size={14} />
-            </Button>
-          </CustomTooltip>
-
+          <FaviconBadge 
+            sourceUrl={snippet.sourceUrl} 
+            sourceDomain={snippet.sourceDomain}
+            size="sm"
+          />
+          
           <CustomTooltip content={copiedSnippetId === snippet.id ? 'Copied!' : 'Copy to clipboard'} side="left">
             <Button
               variant="ghost"
@@ -99,16 +85,12 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
             </Button>
           </CustomTooltip>
 
-          <CustomTooltip content="Delete" side="left">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-slate-400 hover:text-red-400"
-              onClick={() => onDeleteSnippet(snippet.id)}
-            >
-              <Trash2 size={14} />
-            </Button>
-          </CustomTooltip>
+          <HamburgerMenu
+            onEdit={() => onOpenEditModal(snippet)}
+            onDelete={() => onDeleteSnippet(snippet.id)}
+            onViewSource={snippet.sourceUrl ? () => window.open(snippet.sourceUrl, '_blank') : undefined}
+            hasSourceUrl={!!snippet.sourceUrl}
+          />
         </div>
       </div>
       <div className="mb-1 flex items-center gap-1 flex-wrap">

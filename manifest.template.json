@@ -37,10 +37,10 @@
   "commands": {
     "toggle-overlay": {
       "suggested_key": {
-        "default": "Alt+Shift+V",
-        "windows": "Alt+Shift+V",
-        "mac": "Alt+Shift+V",
-        "linux": "Alt+Shift+V"
+        "default": "Ctrl+Shift+Space",
+        "windows": "Ctrl+Shift+Space",
+        "mac": "Command+Shift+Space",
+        "linux": "Ctrl+Shift+Space"
       },
       "description": "Open Clippy quick search"
     }
@@ -54,6 +54,12 @@
       "matches": ["<all_urls>"],
       "js": ["content/hotkey-listener.js"],
       "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/overlay/index.html", "overlay/overlay.js", "assets/*"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

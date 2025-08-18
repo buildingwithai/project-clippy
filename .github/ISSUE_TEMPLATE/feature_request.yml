@@ -1,0 +1,165 @@
+name: "Feature"
+description: "Create a feature card with a lightweight PRD"
+title: "[Feature] <short title>"
+labels: ["feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill this out to create a project card with a mini-PRD. Keep it concise.
+
+  - type: input
+    id: goal
+    attributes:
+      label: Goal
+      description: One-sentence objective of this feature
+      placeholder: e.g., Enable paste into Gmail with preserved formatting
+    validations:
+      required: true
+
+  - type: textarea
+    id: audience_value
+    attributes:
+      label: Audience & Value
+      description: For each audience, describe Problem → Value → Proof (example metric)
+      placeholder: |
+        Customer Success
+        - Problem: Agents spend time reformatting replies
+        - Value: 1-click paste with preserved formatting
+        - Proof: -30% handle time, +NPS on responsiveness
+
+        Sales
+        - Problem: Inconsistent messaging across sequences
+        - Value: Versioned snippets stay on-brand
+        - Proof: +CTR on outreach, +reply rate
+
+        Recruiting
+        - Problem: Manual personalization is slow
+        - Value: Templated variables + rich paste
+        - Proof: Time-to-send ↓, candidate replies ↑
+    validations:
+      required: true
+
+  - type: textarea
+    id: user_stories_by_audience
+    attributes:
+      label: User Stories (by audience)
+      description: Provide 2–3 user stories per audience with acceptance criteria inline
+      placeholder: |
+        Customer Success
+        - Story: As a CS agent, I can paste a canned response into Zendesk retaining links/bold.
+        - Acceptance: 
+          - [ ] Paste works in contenteditable
+          - [ ] Links/bold preserved
+
+        Sales
+        - Story: As an SDR, I insert a versioned snippet into Gmail via hotkey.
+        - Acceptance:
+          - [ ] Works with keyboard shortcut
+          - [ ] Uses latest approved version
+
+        Recruiting
+        - Story: As a recruiter, I can inject variables and paste into LinkedIn DM.
+        - Acceptance:
+          - [ ] Variables rendered
+          - [ ] No CSP errors
+    validations:
+      required: true
+
+  - type: textarea
+    id: click_by_click
+    attributes:
+      label: Click-by-Click (How to use)
+      description: Step-by-step UX flow from a user perspective
+      placeholder: |
+        1. Highlight text on page
+        2. Click floating bubble
+        3. Choose snippet version
+        4. Click Paste
+        5. See success toast
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Testable outcomes; use checklist style
+      placeholder: |
+        - [ ] Pasting works in contenteditable
+        - [ ] Preserves bold/links
+        - [ ] Keyboard shortcut triggers paste
+    validations:
+      required: true
+
+  - type: textarea
+    id: roadblocks_attempts
+    attributes:
+      label: Roadblocks & Attempts
+      description: Document errors, attempted fixes, why they failed, and what ultimately worked
+      placeholder: |
+        Errors/Symptoms:
+        - Unserializable arg to chrome.scripting.executeScript
+        - Paste fails in cross-origin iframe
+
+        Attempts:
+        - A: Inject legacy paste helper – Failed (no focus)
+        - B: Clipboard write + user gesture – Partial (blocked)
+
+        Why Failed:
+        - Missing HTML arg; frame context lost
+
+        What Worked:
+        - Use versioned text/html, coerce HTML to "", try debug paste across frames, fallback to legacy, then clipboard
+
+  - type: textarea
+    id: tech_notes
+    attributes:
+      label: Technical Notes
+      description: Key implementation details, constraints, or open questions
+      placeholder: |
+        - Use background service worker to inject script
+        - Sanitize HTML
+        - Add per-frame diagnostics
+
+  - type: textarea
+    id: release_notes
+    attributes:
+      label: Release Notes & Rollback
+      description: Changelog one-liner and how to toggle/rollback if needed
+      placeholder: |
+        - Release: Adds reliable paste flow to rich editors (Gmail, Zendesk)
+        - Rollback: Disable flag `feature.pasteV2` or revert PR #123
+
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: Artifacts
+      description: Links to screenshots/GIFs, PRs, designs, related issues
+      placeholder: |
+        - GIF: <link>
+        - PRs: #123, #124
+        - Design: <Figma link>
+        - Related: #98
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context / Links
+      description: Related docs, designs, or references
+      placeholder: |
+        - PRD
+        - Figma
+        - Related issues
+
+  - type: checkboxes
+    id: scopes
+    attributes:
+      label: Scoping (optional)
+      description: Quick scoping hints
+      options:
+        - label: Frontend
+        - label: Background/Service Worker
+        - label: Content Script
+        - label: Options/Settings
+        - label: Docs only

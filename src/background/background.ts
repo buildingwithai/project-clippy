@@ -385,6 +385,15 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         await chrome.storage.local.set({ pendingSnippetText: info.selectionText });
       }
       
+      // Auto-capture source URL for snippet
+      try {
+        const sourceUrl = tab.url;
+        console.log('[Clippy] Auto-capturing source URL:', sourceUrl);
+        await chrome.storage.local.set({ pendingSnippetUrl: sourceUrl });
+      } catch (error) {
+        console.warn('[Clippy] Failed to capture source URL:', error);
+      }
+      
       console.log('[Clippy] Attempting to open popup with pending text...');
       try {
         await chrome.action.openPopup();
@@ -1324,7 +1333,56 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     console.log('[Clippy] Updating context menu from settings change');
     updatePasteContextMenu();
     sendResponse({ success: true });
-  } else if (request.type === 'PASTE_SNIPPET' && sender.origin === chrome.runtime.getURL('').slice(0, -1)) {
+  } else if (request.action === 'toggleOverlayNow') {
+    try {
+      console.log('[Clippy] Received toggleOverlayNow from content', { originX: request.originX, originY: request.originY });
+      // Prevent injection on special pages
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (activeTab?.url?.startsWith('chrome://') || activeTab?.url?.startsWith('chrome-extension://') || activeTab?.url?.startsWith('chrome.google.com/webstore')) {
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon48.png'),
+          title: 'Clippy Action',
+          message: 'Clippy cannot be used on this page.'
+        });
+        sendResponse?.({ success: false, error: 'Restricted page' });
+        return true;
+      }
+      const tabId = sender.tab?.id;
+      if (!tabId) {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.id) {
+          sendResponse?.({ success: false, error: 'No active tab' });
+          return true;
+        }
+        await chrome.scripting.executeScript({ 
+          target: { tabId: tab.id }, 
+          func: executeToggleOverlay, 
+          args: [request.originX, request.originY] 
+        });
+        console.log('[Clippy] Successfully injected executeToggleOverlay script from message');
+      } else {
+        await chrome.scripting.executeScript({ 
+          target: { tabId }, 
+          func: executeToggleOverlay, 
+          args: [request.originX, request.originY] 
+        });
+        console.log('[Clippy] Successfully injected executeToggleOverlay script from message');
+      }
+      sendResponse?.({ success: true });
+    } catch (err) {
+      console.error('Failed to toggle overlay from message:', err);
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon48.png'),
+        title: 'Clippy Overlay',
+        message: 'Could not open overlay on this page. Check extension permissions in chrome://extensions and try reloading the page.'
+      });
+      sendResponse?.({ success: false, error: String(err) });
+    }
+    return true; // async response
+  } else if (request.type === 'PASTE_SNIPPET') {
+    // Accept paste requests from content/overlay context
     handlePasteRequest(request.snippet);
   } else if (request.type === 'PASTE_SNIPPET_BY_ID') {
     const { snippetId } = request;
@@ -1599,6 +1657,448 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   }
 });
 
+/**
+ * Filter snippets by domain relevance
+ */
+function filterSnippetsByDomain(allSnippets: Snippet[], domain: string): Snippet[] {
+  if (!domain) return allSnippets;
+
+  // Create scoring system for snippet relevance
+  const scoredSnippets = allSnippets.map(snippet => {
+    let score = 0;
+    
+    // Check tags for exact domain match (highest priority)
+    if (snippet.tags?.includes(domain)) {
+      score += 100;
+    }
+    
+    // Check tags for partial domain match
+    if (snippet.tags?.some(tag => tag.includes(domain) || domain.includes(tag))) {
+      score += 50;
+    }
+    
+    // Check title for domain match
+    if (snippet.title?.toLowerCase().includes(domain.toLowerCase())) {
+      score += 30;
+    }
+    
+    // Check content for domain match
+    if (snippet.text.toLowerCase().includes(domain.toLowerCase())) {
+      score += 20;
+    }
+    
+    // Check for subdomain matches (e.g., "github" matches "github.com")
+    const domainParts = domain.split('.');
+    const mainDomain = domainParts[0]; // e.g., "github" from "github.com"
+    
+    if (snippet.tags?.some(tag => tag.includes(mainDomain))) {
+      score += 25;
+    }
+    
+    if (snippet.title?.toLowerCase().includes(mainDomain.toLowerCase()) || 
+        snippet.text.toLowerCase().includes(mainDomain.toLowerCase())) {
+      score += 15;
+    }
+    
+    return { snippet, score };
+  });
+
+  // Sort by score (highest first), then by lastUsed, then by creation date
+  scoredSnippets.sort((a, b) => {
+    if (a.score !== b.score) return b.score - a.score;
+    
+    if (a.snippet.lastUsed && b.snippet.lastUsed) {
+      return new Date(b.snippet.lastUsed).getTime() - new Date(a.snippet.lastUsed).getTime();
+    }
+    if (a.snippet.lastUsed && !b.snippet.lastUsed) return -1;
+    if (!a.snippet.lastUsed && b.snippet.lastUsed) return 1;
+    
+    return new Date(b.snippet.createdAt).getTime() - new Date(a.snippet.createdAt).getTime();
+  });
+
+  // Return snippets with domain-relevant ones first, then all others
+  const domainRelevant = scoredSnippets.filter(s => s.score > 0).map(s => s.snippet);
+  const others = scoredSnippets.filter(s => s.score === 0).map(s => s.snippet);
+  
+  return [...domainRelevant, ...others];
+}
+
+/**
+ * Simple standalone overlay function that executes immediately
+ */
+function executeToggleOverlay(originX?: number | null, originY?: number | null, forceDomFallback?: boolean) {
+  console.log('[Clippy] executeToggleOverlay called with:', { originX, originY, forceDomFallback });
+  
+  // Check if we're accidentally creating invalid extension URLs
+  console.log('[Clippy] Extension ID check:', typeof chrome !== 'undefined' ? chrome.runtime.id : 'chrome undefined');
+  
+  try {
+    const CONTAINER_ID = 'clippy-search-overlay-container';
+    
+    // Check if overlay already exists and remove it
+    const existingContainer = document.getElementById(CONTAINER_ID);
+    if (existingContainer) {
+      existingContainer.remove();
+      return;
+    }
+
+    // Create dark modal overlay
+    const overlay = document.createElement('div');
+    overlay.id = CONTAINER_ID;
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: transparent;
+      z-index: 2147483647;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding-top: 80px;
+      pointer-events: auto !important;
+    `;
+
+    // Create the modal
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+      background: linear-gradient(135deg, #0f0f0f 0%, #000000 50%, #1a1a1a 100%);
+      border-radius: 16px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 16px;
+      width: 100%;
+      max-width: 36rem;
+      margin: 0 16px;
+      position: relative;
+    `;
+
+    const hostName = location.hostname || '';
+    modal.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          ${hostName ? `<span style="font-size: 0.75rem; background: rgba(255, 255, 255, 0.1); color: white; padding: 4px 8px; border-radius: 9999px;">${hostName}</span>` : ''}
+        </div>
+        <button id="clippy-close-btn" style="background: none; border: none; color: rgba(255, 255, 255, 0.7); cursor: pointer; font-size: 18px; padding: 4px;">✕</button>
+      </div>
+      <input id="clippy-search-input" type="text" placeholder="Search snippets, or use # for tags..." style="width: 100% !important; padding: 12px !important; border: 1px solid rgba(255, 255, 255, 0.15) !important; border-radius: 6px !important; outline: none !important; font-size: 14px !important; margin-bottom: 8px !important; background: rgba(0, 0, 0, 0.6) !important; color: white !important; box-sizing: border-box !important; pointer-events: auto !important; z-index: 2147483647 !important; position: relative !important;">
+      <div id="clippy-results" style="height: 288px; overflow-y: auto; margin-bottom: 8px;">
+        <div style="text-align: center; color: rgba(255, 255, 255, 0.6); padding-top: 32px;">Loading snippets...</div>
+      </div>
+      <div style="text-align: right; font-size: 0.75rem; color: rgba(255, 255, 255, 0.6);">
+        Use ↑↓ to navigate, Enter to select, Esc to close.
+      </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Event handlers
+    const closeBtn = modal.querySelector('#clippy-close-btn');
+    const searchInput = modal.querySelector('#clippy-search-input');
+    const resultsDiv = modal.querySelector('#clippy-results');
+
+    const closeOverlay = () => {
+      overlay.remove();
+    };
+
+    // Close handlers
+    closeBtn?.addEventListener('click', closeOverlay);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeOverlay();
+    });
+
+    // Aggressive event capture to prevent site interference
+    const handleKeydown = (e: KeyboardEvent) => {
+      // Always stop propagation to prevent site capture
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeOverlay();
+        return;
+      }
+      
+      // If Enter key and search input is focused, don't let it bubble to LinkedIn
+      if (e.key === 'Enter' && document.activeElement === searchInput) {
+        e.preventDefault();
+        return;
+      }
+      
+      // Force focus back to search input if LinkedIn tries to steal it
+      if (e.target !== searchInput && searchInput && e.target !== overlay) {
+        setTimeout(() => {
+          (searchInput as HTMLInputElement).focus();
+        }, 0);
+      }
+    };
+    
+    // Only capture keyboard events that affect our modal
+    document.addEventListener('keydown', handleKeydown, true);
+    
+    // Don't interfere with other events that could break LinkedIn's functionality
+    
+    // Also add to overlay
+    overlay.addEventListener('keydown', handleKeydown, true);
+
+    // Load and display snippets with search functionality
+    let allSnippets: any[] = [];
+    let allFolders: any[] = [];
+    let filteredSnippets: any[] = [];
+    
+    const renderSnippets = (snippetsToRender: any[]) => {
+      if (snippetsToRender.length === 0) {
+        if (resultsDiv) resultsDiv.innerHTML = '<div style="text-align: center; color: rgba(255, 255, 255, 0.6); padding-top: 32px;">No snippets found.</div>';
+      } else {
+        if (resultsDiv) resultsDiv.innerHTML = snippetsToRender.map((snippet: any, index: number) => `
+          <div class="clippy-result" data-index="${index}" style="padding: 12px; border-radius: 6px; cursor: pointer; transition: background-color 0.2s; ${index === 0 ? 'background: rgba(255, 255, 255, 0.1);' : ''}">
+            <div style="font-weight: bold; color: white; margin-bottom: 4px;">${snippet.title || snippet.text.substring(0, 60)}</div>
+            <div style="font-size: 0.875rem; color: rgba(255, 255, 255, 0.7); overflow: hidden; text-overflow: ellipsis;">${snippet.text}</div>
+            ${snippet.tags && snippet.tags.length > 0 ? `
+              <div style="display: flex; gap: 4px; margin-top: 4px;">
+                ${snippet.tags.map((tag: string) => `<span style="font-size: 0.75rem; background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.8); padding: 2px 6px; border-radius: 9999px;">#${tag}</span>`).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `).join('');
+
+        // Add click handlers
+        if (resultsDiv) resultsDiv.querySelectorAll('.clippy-result').forEach((el, index) => {
+          el.addEventListener('click', () => {
+            closeOverlay();
+            // Send message to paste snippet
+            if (typeof chrome !== 'undefined' && chrome.runtime) {
+              chrome.runtime.sendMessage({ type: 'PASTE_SNIPPET', snippet: snippetsToRender[index] });
+            }
+          });
+        });
+      }
+    };
+
+    const filterAndSortSnippets = (searchTerm: string = '') => {
+      const domain = location.hostname.replace('www.', '');
+      console.log('[Clippy] Filtering snippets for domain:', domain, 'Total snippets:', allSnippets.length);
+      
+      // Filter by search term
+      let filtered = allSnippets;
+      if (searchTerm.trim()) {
+        const term = searchTerm.toLowerCase();
+        filtered = allSnippets.filter((snippet: any) => {
+          return snippet.title?.toLowerCase().includes(term) ||
+                 snippet.text.toLowerCase().includes(term) ||
+                 snippet.tags?.some((tag: string) => tag.toLowerCase().includes(term));
+        });
+      }
+
+      // Use the folders already loaded
+
+      // Sort by domain relevance using enhanced scoring algorithm
+      const sortedSnippets = filtered.sort((a: any, b: any) => {
+        let scoreA = 0;
+        let scoreB = 0;
+        
+        // FOLDER-BASED SCORING (highest priority - 150 points)
+        const folderA = allFolders.find((f: any) => f.id === a.folderId);
+        const folderB = allFolders.find((f: any) => f.id === b.folderId);
+        
+        if (folderA?.name) {
+          const folderName = folderA.name.toLowerCase();
+          // Check if folder name contains domain keyword (case-insensitive)
+          if (folderName.includes(domain.toLowerCase()) || 
+              domain.toLowerCase().includes(folderName) ||
+              folderName.includes(domain.split('.')[0]?.toLowerCase() || '')) {
+            scoreA += 150;
+          }
+        }
+        
+        if (folderB?.name) {
+          const folderName = folderB.name.toLowerCase();
+          // Check if folder name contains domain keyword (case-insensitive)
+          if (folderName.includes(domain.toLowerCase()) || 
+              domain.toLowerCase().includes(folderName) ||
+              folderName.includes(domain.split('.')[0]?.toLowerCase() || '')) {
+            scoreB += 150;
+          }
+        }
+        
+        // Check source domain for exact match (120 points - higher than tags)
+        if (a.sourceDomain === domain) scoreA += 120;
+        if (b.sourceDomain === domain) scoreB += 120;
+        
+        // Check source domain for partial match (60 points)
+        if (a.sourceDomain && (a.sourceDomain.includes(domain) || domain.includes(a.sourceDomain))) scoreA += 60;
+        if (b.sourceDomain && (b.sourceDomain.includes(domain) || domain.includes(b.sourceDomain))) scoreB += 60;
+        
+        // Check tags for exact domain match (100 points)
+        if (a.tags?.includes(domain)) scoreA += 100;
+        if (b.tags?.includes(domain)) scoreB += 100;
+        
+        // Check tags for partial domain match (50 points)
+        if (a.tags?.some((tag: string) => tag.includes(domain) || domain.includes(tag))) scoreA += 50;
+        if (b.tags?.some((tag: string) => tag.includes(domain) || domain.includes(tag))) scoreB += 50;
+        
+        // Check title for domain match (30 points)
+        if (a.title?.toLowerCase().includes(domain.toLowerCase())) scoreA += 30;
+        if (b.title?.toLowerCase().includes(domain.toLowerCase())) scoreB += 30;
+        
+        // Check content for domain match (20 points)
+        if (a.text.toLowerCase().includes(domain.toLowerCase())) scoreA += 20;
+        if (b.text.toLowerCase().includes(domain.toLowerCase())) scoreB += 20;
+        
+        // Check for subdomain matches (10 points)
+        const domainParts = domain.split('.');
+        const mainDomain = domainParts[0];
+        if (mainDomain && mainDomain !== domain) {
+          if (a.title?.toLowerCase().includes(mainDomain.toLowerCase()) || 
+              a.text.toLowerCase().includes(mainDomain.toLowerCase()) ||
+              a.tags?.some((tag: string) => tag.toLowerCase().includes(mainDomain.toLowerCase()))) {
+            scoreA += 10;
+          }
+          if (b.title?.toLowerCase().includes(mainDomain.toLowerCase()) || 
+              b.text.toLowerCase().includes(mainDomain.toLowerCase()) ||
+              b.tags?.some((tag: string) => tag.toLowerCase().includes(mainDomain.toLowerCase()))) {
+            scoreB += 10;
+          }
+        }
+        
+        // Sort by score (higher first), then by usage frequency
+        if (scoreB !== scoreA) return scoreB - scoreA;
+        return (b.frequency || 0) - (a.frequency || 0);
+      });
+
+      // Debug logging for domain filtering
+      console.log('[Clippy] Domain filtering results for', domain + ':');
+      sortedSnippets.slice(0, 5).forEach((snippet: any, i: number) => {
+        console.log(`  ${i+1}. "${snippet.title || snippet.text.substring(0, 30)}" - sourceDomain: ${snippet.sourceDomain}`);
+      });
+
+      return sortedSnippets;
+    };
+
+    // Add search input event listener
+    if (searchInput) {
+      (searchInput as HTMLInputElement).addEventListener('input', (e) => {
+        const searchTerm = (e.target as HTMLInputElement).value;
+        filteredSnippets = filterAndSortSnippets(searchTerm);
+        renderSnippets(filteredSnippets);
+      });
+    }
+
+    // Load snippets and folders initially
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.local.get(['snippets', 'folders'], (result) => {
+        allSnippets = result.snippets || [];
+        allFolders = result.folders || [];
+        filteredSnippets = filterAndSortSnippets();
+        renderSnippets(filteredSnippets);
+      });
+    }
+
+    // Extremely aggressive focus handling for sites like LinkedIn
+    const focusSearchInput = () => {
+      const input = searchInput as HTMLInputElement;
+      if (input && document.querySelector('#clippy-search-overlay-container')) {
+        try {
+          // Blur any existing focused element first
+          if (document.activeElement && document.activeElement !== input) {
+            (document.activeElement as HTMLElement).blur();
+          }
+          
+          // Force focus with multiple methods
+          input.focus();
+          input.click();
+          
+          // Position cursor at end instead of selecting all text
+          const length = input.value.length;
+          input.setSelectionRange(length, length);
+          
+          // Set attributes to ensure focusability
+          input.setAttribute('tabindex', '0');
+          input.setAttribute('autofocus', 'true');
+          
+          // Dispatch focus event manually
+          input.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+          
+          const isFocused = document.activeElement === input;
+          console.log('[Clippy] Focus attempt:', isFocused ? 'SUCCESS' : 'FAILED', 'activeElement:', document.activeElement?.tagName, document.activeElement?.id);
+          
+          return isFocused;
+        } catch (err) {
+          console.warn('[Clippy] Focus attempt failed:', err);
+          return false;
+        }
+      }
+      return false;
+    };
+
+    // Continuous focus attempts until successful
+    let focusAttempts = 0;
+    const maxFocusAttempts = 20;
+    
+    const continuousFocus = () => {
+      if (focusAttempts >= maxFocusAttempts) return;
+      
+      const success = focusSearchInput();
+      focusAttempts++;
+      
+      if (!success && document.querySelector('#clippy-search-overlay-container')) {
+        setTimeout(continuousFocus, 100);
+      }
+    };
+    
+    // Re-enable aggressive focusing for LinkedIn compatibility
+    setTimeout(continuousFocus, 10);
+    setTimeout(continuousFocus, 50);
+    setTimeout(continuousFocus, 150);
+    setTimeout(continuousFocus, 300);
+    setTimeout(continuousFocus, 500);
+    
+    // Add comprehensive event handlers
+    if (searchInput) {
+      const input = searchInput as HTMLInputElement;
+      
+      // Re-enable focus event handlers with reduced event interference
+      input.addEventListener('click', (e) => {
+        // Don't stop propagation to avoid LinkedIn interference
+        setTimeout(focusSearchInput, 10);
+      });
+      
+      input.addEventListener('blur', (e) => {
+        console.log('[Clippy] Input blurred, attempting refocus...');
+        if (document.querySelector('#clippy-search-overlay-container')) {
+          setTimeout(focusSearchInput, 50);
+        }
+      });
+      
+      input.addEventListener('mousedown', (e) => {
+        // Reduced event interference
+        setTimeout(focusSearchInput, 0);
+      });
+      
+      // Focus event to maintain
+      input.addEventListener('focus', (e) => {
+        console.log('[Clippy] Input successfully focused');
+      });
+    }
+    
+  } catch (error) {
+    console.error('[Clippy] Error in executeToggleOverlay:', error);
+    
+    // Create error modal
+    const errorModal = document.createElement('div');
+    errorModal.style.cssText = `
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 400px; height: 200px; background: darkred; color: white; padding: 20px;
+      z-index: 2147483647; border: 2px solid red; font-family: Arial;
+    `;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    errorModal.innerHTML = `<h3>Clippy Error</h3><p>executeToggleOverlay failed: ${errorMessage}</p><button onclick="this.parentElement.remove()">Close</button>`;
+    document.body.appendChild(errorModal);
+  }
+}
+
 chrome.commands.onCommand.addListener(async (command, tab) => {
   if (command === 'toggle-overlay' && tab?.id) {
     console.log(`Command '${command}' triggered on tab ${tab.id}`);
@@ -1617,8 +2117,13 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
     // Inject the content script to toggle the overlay
     chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: toggleOverlay,
-    }).catch(err => console.error('Failed to inject script:', err));
+      func: executeToggleOverlay,
+      args: [null, null, false]
+    }).then(() => {
+      console.log('[Clippy] Successfully injected executeToggleOverlay script');
+    }).catch(err => {
+      console.error('[Clippy] Failed to inject script:', err);
+    });
     return;
   }
 
@@ -1657,55 +2162,5 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
   }
 });
 
-/**
- * Injected into the active page to toggle the search overlay.
- * This function creates a host element, attaches a shadow DOM, and injects an
- * iframe pointing to the React-based overlay application.
- */
-function toggleOverlay() {
-  const CONTAINER_ID = 'clippy-search-overlay-container';
-
-  // If the overlay exists, remove it and focus the body
-  const existingContainer = document.getElementById(CONTAINER_ID);
-  if (existingContainer) {
-    existingContainer.remove();
-    window.focus(); // Return focus to the main page
-    return;
-  }
-
-  // Create the host container for the shadow DOM
-  const host = document.createElement('div');
-  host.id = CONTAINER_ID;
-  document.body.appendChild(host);
-
-  // Create a shadow root
-  const shadowRoot = host.attachShadow({ mode: 'open' });
-
-  // Create the iframe that will host the React app
-  const iframe = document.createElement('iframe');
-  iframe.src = chrome.runtime.getURL('overlay/index.html');
-  Object.assign(iframe.style, {
-    width: '100vw',
-    height: '100vh',
-    border: 'none',
-    position: 'fixed',
-    top: '0',
-    left: '0',
-    zIndex: '2147483647',
-  });
-
-  // Append the iframe to the shadow root
-  shadowRoot.appendChild(iframe);
-
-  // Add a listener to remove the overlay when a message is received from the iframe
-  const messageListener = (event: MessageEvent) => {
-    if (event.source === iframe.contentWindow && event.data.type === 'CLOSE_CLIPPY_OVERLAY') {
-      host.remove();
-      window.removeEventListener('message', messageListener);
-    }
-  };
-
-  window.addEventListener('message', messageListener);
-}
-
 console.log('Background script loaded. Context menus initialized.');
+

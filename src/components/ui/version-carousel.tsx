@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { getAllVersions, getCurrentVersion } from '@/utils/snippet-helpers';
 import type { Snippet, SnippetVersion } from '@/utils/types';
+import { SnippetPreviewTooltip } from '@/components/ui/SnippetPreviewTooltip';
 
 interface VersionCarouselProps {
   snippet: Snippet;
@@ -102,50 +103,56 @@ export const VersionCarousel: React.FC<VersionCarouselProps> = ({
       {/* Divider */}
       <div className="w-full h-px bg-white/8 mb-2" />
       
-      {/* Content with slide animation - compact preview */}
+      {/* Content with slide animation - compact preview wrapped with hover tooltip for full content */}
       <div className="relative overflow-hidden mb-2">
         <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={viewingVersionIndex}
-            initial={{ x: 20, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: -20, opacity: 0 }}
-            transition={{ 
-              duration: 0.28, 
-              ease: [0.25, 0.1, 0.25, 1] // ease-out
-            }}
-            className="text-slate-300 bg-slate-900/50 p-2.5 rounded-md max-h-20 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800"
-            style={{fontSize: '10px'}}
+          <SnippetPreviewTooltip
+            html={currentVersion?.html}
+            text={currentVersion?.text}
+            side="bottom"
           >
-            {error ? (
-              <div className="text-red-400 text-xs">
-                {error}
-              </div>
-            ) : currentVersion ? (
-              currentVersion.html ? (
-                <div 
-                  className="whitespace-pre-wrap break-all snippet-html-content"
-                  dangerouslySetInnerHTML={{ 
-                    __html: (() => {
-                      const textContent = currentVersion.html.replace(/<[^>]*>/g, ''); // Strip HTML tags for length calculation
-                      if (textContent.length > 100) {
-                        // For HTML content, we truncate the text content and add ellipsis
-                        return textContent.substring(0, 100) + '...';
-                      }
-                      return currentVersion.html;
-                    })()
-                  }} 
-                />
-              ) : (
-                <pre className="whitespace-pre-wrap break-all">
-                  {currentVersion.text.length > 100 
-                    ? currentVersion.text.substring(0, 100) + '...'
-                    : currentVersion.text
-                  }
-                </pre>
-              )
-            ) : null}
-          </motion.div>
+            <motion.div
+              key={viewingVersionIndex}
+              initial={{ x: 20, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -20, opacity: 0 }}
+              transition={{ 
+                duration: 0.28, 
+                ease: [0.25, 0.1, 0.25, 1] // ease-out
+              }}
+              className="text-slate-300 bg-slate-900/50 p-2.5 rounded-md max-h-20 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-800"
+              style={{fontSize: '10px'}}
+            >
+              {error ? (
+                <div className="text-red-400 text-xs">
+                  {error}
+                </div>
+              ) : currentVersion ? (
+                currentVersion.html ? (
+                  <div 
+                    className="whitespace-pre-wrap break-all snippet-html-content"
+                    dangerouslySetInnerHTML={{ 
+                      __html: (() => {
+                        const textContent = currentVersion.html.replace(/<[^>]*>/g, ''); // Strip HTML tags for length calculation
+                        if (textContent.length > 100) {
+                          // For HTML content, we truncate the text content and add ellipsis
+                          return textContent.substring(0, 100) + '...';
+                        }
+                        return currentVersion.html;
+                      })()
+                    }} 
+                  />
+                ) : (
+                  <pre className="whitespace-pre-wrap break-all">
+                    {currentVersion.text.length > 100 
+                      ? currentVersion.text.substring(0, 100) + '...'
+                      : currentVersion.text
+                    }
+                  </pre>
+                )
+              ) : null}
+            </motion.div>
+          </SnippetPreviewTooltip>
         </AnimatePresence>
       </div>
       

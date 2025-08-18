@@ -525,9 +525,12 @@ const App: React.FC = () => {
   // Calculate filtered snippets based on search term and active folder
   const { pinnedSnippets, otherSnippets } = React.useMemo(() => {
     const filtered = snippets.filter(snippet => {
+      const searchLower = searchTerm.toLowerCase();
       const matchesSearch = searchTerm === '' ||
-        snippet.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        snippet.text.toLowerCase().includes(searchTerm.toLowerCase());
+        snippet.title?.toLowerCase().includes(searchLower) ||
+        snippet.text.toLowerCase().includes(searchLower) ||
+        snippet.sourceDomain?.toLowerCase().includes(searchLower) ||
+        snippet.tags?.some(tag => tag.toLowerCase().includes(searchLower));
       const matchesFolder = activeFilterFolderId === null || snippet.folderId === activeFilterFolderId;
       return matchesSearch && matchesFolder;
     });
@@ -632,7 +635,7 @@ const App: React.FC = () => {
   };
 
   // Handle saving snippet from modal (create or update)
-  const handleSaveFromModal = async (snippetData: { title: string; text: string; html?: string; folderId: string | null; id?: string; isNewVersion?: boolean; originalSnippetId?: string; versionTitle?: string }) => {
+  const handleSaveFromModal = async (snippetData: { title: string; text: string; html?: string; folderId: string | null; id?: string; isNewVersion?: boolean; originalSnippetId?: string; versionTitle?: string; sourceUrl?: string; sourceDomain?: string }) => {
     let updatedSnippets;
     const finalFolderId = (snippetData.folderId === '' || snippetData.folderId === null) ? undefined : snippetData.folderId;
 
@@ -701,6 +704,8 @@ const App: React.FC = () => {
         folderId: finalFolderId,
         createdAt: new Date().toISOString(),
         frequency: 0,
+        sourceUrl: snippetData.sourceUrl,
+        sourceDomain: snippetData.sourceDomain,
         versions: [{
           id: `version-${Date.now()}-0`,
           text: snippetData.text.trim(),

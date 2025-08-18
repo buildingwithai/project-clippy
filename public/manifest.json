@@ -11,6 +11,9 @@
     "alarms",
     "notifications"
   ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -35,9 +38,23 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content/content.js"]
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/hotkey-listener.js"],
+      "run_at": "document_start"
     }
   ],
   "commands": {
+    "toggle-overlay": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Space",
+        "windows": "Ctrl+Shift+Space",
+        "mac": "Command+Shift+Space",
+        "linux": "Ctrl+Shift+Space"
+      },
+      "description": "Open Clippy quick search"
+    },
     "hotkey-1": {
       "suggested_key": {
         "default": "Ctrl+Shift+1"
@@ -55,12 +72,17 @@
         "default": "Ctrl+Shift+3"
       },
       "description": "Activate snippet hotkey 3"
-    },
-    "hotkey-4": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+4"
-      },
-      "description": "Activate snippet hotkey 4"
     }
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/overlay/index.html",
+        "overlay/overlay.js",
+        "assets/*",
+        "icons/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }
