@@ -83,37 +83,43 @@ jobs:
             const desiredStatus = statusInput || (process.env.PR_IS_MERGED === 'true' ? 'Done' : (process.env.PR_STATE === 'closed' ? 'Done' : 'In Progress'));
 
             // Resolve Project and Status field/options
-            const projectQuery = `
-              query($login: String!, $number: Int!) {
-                organization(login: $login) {
-                  projectV2(number: $number) {
-                    id
-                    title
-                    fields(first: 50) {
-                      nodes {
-                        ... on ProjectV2FieldCommon { id name }
-                        ... on ProjectV2SingleSelectField { id name options { id name } }
-                      }
-                    }
-                  }
-                }
-                user(login: $login) {
-                  projectV2(number: $number) {
-                    id
-                    title
-                    fields(first: 50) {
-                      nodes {
-                        ... on ProjectV2FieldCommon { id name }
-                        ... on ProjectV2SingleSelectField { id name options { id name } }
-                      }
-                    }
-                  }
+            let isOrg = false;
+            try {
+              const { data: u } = await github.rest.users.getByUsername({ username: ownerLogin });
+              isOrg = (u.type === 'Organization');
+            } catch (e) {
+              core.warning(`Owner lookup failed for ${ownerLogin}, assuming User. ${e.status || ''} ${e.message}`);
+            }
+
+            const baseFields = `
+              id
+              title
+              fields(first: 50) {
+                nodes {
+                  ... on ProjectV2FieldCommon { id name }
+                  ... on ProjectV2SingleSelectField { id name options { id name } }
                 }
               }
             `;
 
-            const pdata = await github.graphql(projectQuery, { login: ownerLogin, number: projectNumber });
-            const project = pdata.organization?.projectV2 || pdata.user?.projectV2;
+            let project = null;
+            if (isOrg) {
+              const q = `
+                query($login: String!, $number: Int!) {
+                  organization(login: $login) { projectV2(number: $number) { ${baseFields} } }
+                }
+              `;
+              const pdata = await github.graphql(q, { login: ownerLogin, number: projectNumber });
+              project = pdata?.organization?.projectV2 || null;
+            } else {
+              const q = `
+                query($login: String!, $number: Int!) {
+                  user(login: $login) { projectV2(number: $number) { ${baseFields} } }
+                }
+              `;
+              const pdata = await github.graphql(q, { login: ownerLogin, number: projectNumber });
+              project = pdata?.user?.projectV2 || null;
+            }
             if (!project?.id) {
               core.setFailed(`Project not found for owner=${ownerLogin} number=${projectNumber}`);
               return;
