@@ -137,8 +137,32 @@ jobs:
                   itemId = addRes.addProjectV2ItemById.item.id;
                 } catch (e) {
                   core.warning(`addProjectV2ItemById failed for #${num} (possibly already added): ${e?.errors?.[0]?.message || e.message}`);
-                  // Best-effort: skip to status update not possible without itemId. Continue next.
-                  continue;
+                  // Try to find existing item ID for this issue in the target Project and update status
+                  try {
+                    const lookup = await github.graphql(`
+                      query($owner: String!, $repo: String!, $number: Int!) {
+                        repository(owner: $owner, name: $repo) {
+                          issue(number: $number) {
+                            id
+                            projectItems(first: 20) {
+                              nodes { id project { id } }
+                            }
+                          }
+                        }
+                      }
+                    `, { owner: context.repo.owner, repo: context.repo.repo, number: num });
+                    const nodes = lookup?.repository?.issue?.projectItems?.nodes || [];
+                    const match = nodes.find(n => n?.project?.id === project.id);
+                    if (match?.id) {
+                      itemId = match.id;
+                    } else {
+                      core.warning(`No existing Project item found for #${num}; skipping status update.`);
+                      continue;
+                    }
+                  } catch (qe) {
+                    core.warning(`Lookup existing item failed for #${num}: ${qe.message}`);
+                    continue;
+                  }
                 }
 
                 // Set Status
