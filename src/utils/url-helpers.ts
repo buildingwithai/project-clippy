@@ -49,15 +49,14 @@ export const validateUrl = (url: string): boolean => {
  * Uses Google's favicon service with fallback to generic globe icon.
  */
 export const getFaviconUrl = (domain: string): string => {
-  // Temporarily returning emoji to stop console spam while debugging domain filtering
-  return '🌐'; // Fallback emoji
-  
-  // if (!domain) {
-  //   return '🌐'; // Fallback emoji
-  // }
-  
+  // Guard: if domain is missing, return a neutral fallback
+  if (!domain || typeof domain !== 'string') {
+    return '🌐';
+  }
+
   // Use Google's favicon service with high resolution (128px source for crisp scaling)
-  // return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+  // This is widely used and does not require any special permissions.
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`;
 };
 
 /**
