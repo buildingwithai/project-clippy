@@ -2,7 +2,7 @@ name: Project Automation
 
 on:
   issues:
-    types: [opened]
+    types: [opened, labeled, closed]
   pull_request:
     types: [opened, closed]
 
@@ -115,6 +115,105 @@ jobs:
               itemId,
               fieldId: statusField.id,
               optionId: plannedOpt.id,
+            });
+
+  issue_closed_to_done:
+    if: github.event_name == 'issues' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Move closed issue to Done in Project
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const ownerLogin = 'buildingwithai';
+            const projectNumber = 1; // https://github.com/users/buildingwithai/projects/1
+
+            const issueNodeId = context.payload.issue.node_id;
+
+            const projectData = await github.graphql(`
+              query($login: String!, $number: Int!) {
+                user(login: $login) {
+                  projectV2(number: $number) {
+                    id
+                    title
+                    fields(first: 50) {
+                      nodes {
+                        ... on ProjectV2FieldCommon { id name }
+                        ... on ProjectV2SingleSelectField { id name options { id name } }
+                      }
+                    }
+                  }
+                }
+              }
+            `, { login: ownerLogin, number: projectNumber });
+
+            const project = projectData.user.projectV2;
+            if (!project) {
+              core.setFailed('Project not found');
+              return;
+            }
+
+            const statusField = project.fields.nodes.find(f => f.name === 'Status' && f.options);
+            if (!statusField) {
+              core.setFailed('Status field not found in Project');
+              return;
+            }
+            const doneOpt = statusField.options.find(o => /done|completed/i.test(o.name)) || statusField.options[0];
+
+            // Ensure issue exists as a project item
+            let itemId = null;
+            try {
+              const addRes = await github.graphql(`
+                mutation($projectId: ID!, $contentId: ID!) {
+                  addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                    item { id }
+                  }
+                }
+              `, { projectId: project.id, contentId: issueNodeId });
+              itemId = addRes.addProjectV2ItemById.item.id;
+            } catch (e) {
+              core.warning(`Issue addProjectV2ItemById failed (possibly already added): ${e?.errors?.[0]?.message || e.message}`);
+              // Lookup existing item for this issue
+              const issueNumber = context.payload.issue.number;
+              try {
+                const lookup = await github.graphql(`
+                  query($owner: String!, $repo: String!, $number: Int!) {
+                    repository(owner: $owner, name: $repo) {
+                      issue(number: $number) {
+                        projectItems(first: 20) { nodes { id project { id } } }
+                      }
+                    }
+                  }
+                `, { owner: context.repo.owner, repo: context.repo.repo, number: issueNumber });
+                const nodes = lookup?.repository?.issue?.projectItems?.nodes || [];
+                const match = nodes.find(n => n?.project?.id === project.id);
+                if (match?.id) {
+                  itemId = match.id;
+                } else {
+                  core.setFailed('Issue project item not found for Status update.');
+                  return;
+                }
+              } catch (qe) {
+                core.setFailed(`Issue project item lookup failed: ${qe.message}`);
+                return;
+              }
+            }
+
+            await github.graphql(`
+              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $projectId,
+                  itemId: $itemId,
+                  fieldId: $fieldId,
+                  value: { singleSelectOptionId: $optionId }
+                }) { clientMutationId }
+              }
+            `, {
+              projectId: project.id,
+              itemId,
+              fieldId: statusField.id,
+              optionId: doneOpt.id,
             });
 
   pr_to_progress_or_done:
