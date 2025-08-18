@@ -1,0 +1,150 @@
+name: Auto Feature Intake
+
+on:
+  issues:
+    types: [opened, labeled, edited]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  intake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Classify as feature and ensure body completeness
+        id: ensure
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            if (!issue) {
+              core.notice('No issue payload; skipping.');
+              return;
+            }
+
+            const title = issue.title || '';
+            const incomingLabel = context.payload.label?.name || '';
+            const labels = (issue.labels || []).map(l => typeof l === 'string' ? l : l.name);
+            const hasFeatureLabel = labels.includes('feature') || incomingLabel === 'feature';
+            const looksFeatureTitle = /(^\[Feature\])|(^feat[:(])/i.test(title);
+
+            const isFeature = hasFeatureLabel || looksFeatureTitle;
+            if (!isFeature) {
+              core.notice('Issue not classified as feature; skipping.');
+              core.setOutput('is_feature', 'false');
+              return;
+            }
+            core.setOutput('is_feature', 'true');
+
+            // Ensure 'feature' label present
+            if (!hasFeatureLabel) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: ['feature'],
+              });
+              core.notice("Added 'feature' label.");
+            }
+
+            // Ensure body has all sections
+            const original = issue.body || '';
+            const sections = [
+              { key: 'Goal', scaffold: 'Goal\n\n[Describe the single outcome this feature seeks to achieve]\n' },
+              { key: 'Audience & Value', scaffold: 'Audience & Value\n\nCustomer Success\n- Problem:\n- Value:\n- Proof:\n\nSales\n- Problem:\n- Value:\n- Proof:\n\nRecruiting\n- Problem:\n- Value:\n- Proof:\n' },
+              { key: 'User Stories (by audience)', scaffold: 'User Stories (by audience)\n\nCustomer Success\n- Story:\n- Acceptance:\n  - [ ] ...\n\nSales\n- Story:\n- Acceptance:\n  - [ ] ...\n\nRecruiting\n- Story:\n- Acceptance:\n  - [ ] ...\n' },
+              { key: 'Click-by-Click (How to use)', scaffold: 'Click-by-Click (How to use)\n\n1. ...\n2. ...\n3. ...\n' },
+              { key: 'Acceptance Criteria', scaffold: 'Acceptance Criteria\n\n- [ ] ...\n- [ ] ...\n- [ ] ...\n' },
+              { key: 'Roadblocks & Attempts', scaffold: 'Roadblocks & Attempts\n\nErrors/Symptoms:\n- ...\nAttempts:\n- ...\nWhy Failed:\n- ...\nWhat Worked:\n- ...\n' },
+              { key: 'Technical Notes', scaffold: 'Technical Notes\n\n- Code areas:\n- Security/CSP:\n- Perf:\n' },
+              { key: 'Release Notes & Rollback', scaffold: 'Release Notes & Rollback\n\n- Release:\n- Rollback:\n' },
+              { key: 'Artifacts', scaffold: 'Artifacts\n\n- GIF/Screens:\n- PRs:\n- Related:\n' },
+            ];
+            let body = original.trim();
+            for (const s of sections) {
+              if (!new RegExp(`(^|\n)${s.key}(\n|$)`, 'i').test(body)) {
+                body += (body ? '\n\n' : '') + s.scaffold.trim();
+              }
+            }
+            if (body !== original.trim()) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body,
+              });
+              core.notice('Updated issue body with missing sections.');
+            } else {
+              core.notice('All sections present; no update needed.');
+            }
+
+      - name: Add to Project with Status=Planned
+        if: steps.ensure.outputs.is_feature == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const ownerLogin = 'buildingwithai';
+            const projectNumber = 1;
+            const contentId = context.payload.issue.node_id;
+
+            const projectData = await github.graphql(`
+              query($login: String!, $number: Int!) {
+                user(login: $login) {
+                  projectV2(number: $number) {
+                    id
+                    title
+                    fields(first: 50) {
+                      nodes {
+                        ... on ProjectV2FieldCommon { id name }
+                        ... on ProjectV2SingleSelectField { id name options { id name } }
+                      }
+                    }
+                  }
+                }
+              }
+            `, { login: ownerLogin, number: projectNumber });
+
+            const project = projectData?.user?.projectV2;
+            if (!project) {
+              core.setFailed('Project not found');
+              return;
+            }
+            const statusField = project.fields.nodes.find(f => f.name === 'Status' && f.options);
+            if (!statusField) {
+              core.setFailed('Status field not found');
+              return;
+            }
+            const planned = statusField.options.find(o => /planned/i.test(o.name)) || statusField.options[0];
+
+            try {
+              const addRes = await github.graphql(`
+                mutation($projectId: ID!, $contentId: ID!) {
+                  addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                    item { id }
+                  }
+                }
+              `, { projectId: project.id, contentId });
+              const itemId = addRes.addProjectV2ItemById.item.id;
+
+              await github.graphql(`
+                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $projectId,
+                    itemId: $itemId,
+                    fieldId: $fieldId,
+                    value: { singleSelectOptionId: $optionId }
+                  }) { clientMutationId }
+                }
+              `, {
+                projectId: project.id,
+                itemId,
+                fieldId: statusField.id,
+                optionId: planned.id,
+              });
+              core.notice('Added to Project and set Status=Planned');
+            } catch (e) {
+              core.warning(`addProject or status update failed (possibly already added): ${e.message}`);
+            }
