@@ -1,0 +1,88 @@
+name: Web Intake → Issue (Status=Planned)
+
+on:
+  repository_dispatch:
+    types: [web-intake.create]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  create_and_add_to_project:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate payload
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const p = context.payload.client_payload || {};
+            if (!p.title || !p.body) {
+              core.setFailed('client_payload.title and client_payload.body are required');
+            }
+
+      - name: Create Issue from web intake
+        id: create_issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const p = context.payload.client_payload || {};
+            const labels = Array.isArray(p.labels) ? p.labels : ['intake'];
+            const res = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: p.title,
+              body: p.body,
+              labels,
+            });
+            core.setOutput('issue_number', res.data.number);
+            core.setOutput('issue_node_id', res.data.node_id);
+
+      - name: Add Issue to Project and set Status=Planned
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const ownerLogin = 'buildingwithai';
+            const projectNumber = 1; // https://github.com/users/buildingwithai/projects/1
+            const contentId = '${{ steps.create_issue.outputs.issue_node_id }}';
+
+            // Fetch project and fields
+            const query = `
+              query($login: String!, $number: Int!) {
+                user(login: $login) {
+                  projectV2(number: $number) {
+                    id
+                    fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name } ... on ProjectV2SingleSelectField { id name options { id name } } } }
+                  }
+                }
+              }
+            `;
+            const data = await github.graphql(query, { login: ownerLogin, number: projectNumber });
+            const project = data.user.projectV2;
+            if (!project) {
+              core.setFailed('Project not found');
+            }
+
+            // Add item
+            const addRes = await github.graphql(`
+              mutation($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) { item { id } }
+              }
+            `, { projectId: project.id, contentId });
+            const itemId = addRes.addProjectV2ItemById.item.id;
+
+            // Set Status=Planned
+            const statusField = project.fields.nodes.find(f => f.name === 'Status' && f.options);
+            if (!statusField) {
+              core.setFailed('Status field not found');
+            }
+            const plannedOpt = statusField.options.find(o => /planned/i.test(o.name)) || statusField.options[0];
+            await github.graphql(`
+              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                updateProjectV2ItemFieldValue(input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: { singleSelectOptionId: $optionId } }) { projectV2Item { id } }
+              }
+            `, { projectId: project.id, itemId, fieldId: statusField.id, optionId: plannedOpt.id });
+            core.notice(`Created #${{ steps.create_issue.outputs.issue_number }} and set Status=Planned`);
