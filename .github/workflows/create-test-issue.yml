@@ -1,0 +1,176 @@
+name: Create Test Feature Issue
+
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: Issue title
+        required: true
+        default: "[Feature] Reliable rich paste (v2) — test"
+      project_owner:
+        description: GitHub username that owns the Project
+        required: true
+        default: "buildingwithai"
+      project_number:
+        description: Project number (from URL /projects/<number>)
+        required: true
+        default: "1"
+
+permissions:
+  contents: read
+  issues: write
+  projects: write
+
+jobs:
+  create_issue_and_add_to_project:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Feature issue with PRD sections
+        id: create
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const title = core.getInput('title');
+            const body = `
+            Goal\n
+            Ensure hotkeys 1–4 paste versioned text/HTML reliably across frames and rich editors without unserializable argument errors.\n
+            Audience & Value\n
+            Customer Success\n
+            - Problem: Agents lose formatting when pasting replies into Zendesk/Intercom; rework increases handle time.\n
+            - Value: One-click paste preserves links/headings/typography.\n
+            - Proof: -25–30% average handle time; higher CSAT on response quality.\n
+            Sales\n
+            - Problem: Inconsistent messaging and broken formatting in Gmail/Outlook reduce reply rates.\n
+            - Value: Versioned, on-brand snippets paste cleanly via hotkey.\n
+            - Proof: +CTR on outreach; +reply rate on first-touch templates.\n
+            Recruiting\n
+            - Problem: Manual personalization in LinkedIn/Gmail is slow and formatting breaks.\n
+            - Value: Variables + rich paste speed up outbound while keeping brand tone.\n
+            - Proof: Time-to-send ↓; candidate reply rate ↑.\n
+            User Stories (by audience)\n
+            Customer Success\n
+            - Story: As a CS agent, I can paste a canned response into Zendesk retaining links and bold.\n
+            - Acceptance:\n
+              - [ ] Paste succeeds in contenteditable\n
+              - [ ] Links/bold preserved\n
+              - [ ] Works inside iframes\n
+            Sales\n
+            - Story: As an SDR, I can insert a versioned snippet into Gmail via hotkey without breaking formatting.\n
+            - Acceptance:\n
+              - [ ] Hotkeys 1–4 paste current approved version\n
+              - [ ] No “unserializable argument” errors\n
+              - [ ] Preserves lists and hyperlinks\n
+            Recruiting\n
+            - Story: As a recruiter, I can paste a templated variable snippet into LinkedIn DMs.\n
+            - Acceptance:\n
+              - [ ] Variables render correctly\n
+              - [ ] Paste succeeds within embedded editors\n
+              - [ ] Clipboard fallback works when injection fails\n
+            Click-by-Click (How to use)\n
+            1. Focus a rich text editor (Gmail, Zendesk, Intercom, LinkedIn).\n
+            2. Trigger hotkey 1–4 or use the floating bubble → Paste.\n
+            3. The extension injects versioned text/HTML into the active element.\n
+            4. Observe preserved formatting and a success toast (where applicable).\n
+            Acceptance Criteria\n
+            - [ ] Hotkeys 1–4 paste into focused inputs/contenteditable across top frame and iframes.\n
+            - [ ] Always use current approved version of snippet for text/HTML.\n
+            - [ ] No unserializable argument errors from chrome.scripting.executeScript.\n
+            - [ ] Per-frame attempt + fallback: debug paste → legacy paste → clipboard copy (and URL nav if applicable).\n
+            - [ ] Diagnostic logs emitted per frame.\n
+            Roadblocks & Attempts\n
+            Errors/Symptoms:\n
+            - “Value is unserializable” from chrome.scripting.executeScript when HTML undefined.\n
+            - Paste failing in nested frames.\n
+            - Using stale snippet fields.\n
+            Attempts:\n
+            - A: Legacy paste helper only → Failed (no focus).\n
+            - B: Direct clipboard write + user gesture → Partial.\n
+            - C: Single-frame injection → Unreliable.\n
+            Why Failed:\n
+            - HTML arg undefined; strict MV3 serialization.\n
+            - Not targeting all frames; active element not found in correct frame.\n
+            - Stale content used.\n
+            What Worked:\n
+            - Resolve snippet via getCurrentVersion(snippet) before paste.\n
+            - Coerce HTML to empty string when undefined.\n
+            - Frame-robust flow: debug across frames → legacy → clipboard fallback.\n
+            - Add per-frame diagnostics in background logs.\n
+            Technical Notes\n
+            - Background: src/background/background.ts; versioned text/html; args: [text, html ?? ''].\n
+            - Multi-frame attempt: debug → legacy → clipboard.\n
+            - Security: sanitize HTML; no keys in page scope.\n
+            - CSP/Permissions: unchanged.\n
+            Release Notes & Rollback\n
+            - Release: Improves paste reliability across rich editors; resolves unserializable arg failures.\n
+            - Rollback: Revert PR or disable feature flag if present.\n
+            Artifacts\n
+            - GIF/Screens: (attach)\n
+            - PRs: (link)\n
+            - Related: (link)\n
+            `;
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['feature'],
+              body,
+            });
+            core.setOutput('issue_node_id', issue.node_id);
+            core.setOutput('issue_number', issue.number.toString());
+      - name: Add Issue to Project and set Status=Planned
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const ownerLogin = core.getInput('project_owner');
+            const projectNumber = parseInt(core.getInput('project_number'), 10);
+            const contentId = core.getInput('issue_node_id') || '${{ steps.create.outputs.issue_node_id }}';
+
+            const projectData = await github.graphql(`
+              query($login: String!, $number: Int!) {
+                user(login: $login) {
+                  projectV2(number: $number) {
+                    id
+                    fields(first: 50) {
+                      nodes {
+                        ... on ProjectV2FieldCommon { id name }
+                        ... on ProjectV2SingleSelectField { id name options { id name } }
+                      }
+                    }
+                  }
+                }
+              }
+            `, { login: ownerLogin, number: projectNumber });
+
+            const project = projectData.user.projectV2;
+            if (!project) core.setFailed('Project not found');
+
+            const statusField = project.fields.nodes.find(f => f.name === 'Status' && f.options);
+            if (!statusField) core.setFailed('Status field not found');
+            const plannedOpt = statusField.options.find(o => /planned/i.test(o.name)) || statusField.options[0];
+
+            const addRes = await github.graphql(`
+              mutation($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                  item { id }
+                }
+              }
+            `, { projectId: project.id, contentId });
+            const itemId = addRes.addProjectV2ItemById.item.id;
+
+            await github.graphql(`
+              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $projectId,
+                  itemId: $itemId,
+                  fieldId: $fieldId,
+                  value: { singleSelectOptionId: $optionId }
+                }) { clientMutationId }
+              }
+            `, {
+              projectId: project.id,
+              itemId,
+              fieldId: statusField.id,
+              optionId: plannedOpt.id,
+            });

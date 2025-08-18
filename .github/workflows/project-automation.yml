@@ -20,7 +20,7 @@ jobs:
       - name: Add Issue to Project and set Status=Planned
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.PROJECT_TOKEN }}
           script: |
             const ownerLogin = 'buildingwithai';
             const projectNumber = 1; // https://github.com/users/buildingwithai/projects/1
@@ -97,7 +97,7 @@ jobs:
       - name: Add/Update PR in Project based on state
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.PROJECT_TOKEN }}
           script: |
             const ownerLogin = 'buildingwithai';
             const projectNumber = 1; // https://github.com/users/buildingwithai/projects/1
