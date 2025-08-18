@@ -22,7 +22,7 @@
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_popup": "popup/index.html",
+    "default_popup": "src/popup/index.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -45,15 +45,6 @@
       "description": "Open Clippy quick search"
     }
   },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "overlay/*",
-        "assets/*"
-      ],
-      "matches": ["<all_urls>"]
-    }
-  ],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
@@ -63,6 +54,12 @@
       "matches": ["<all_urls>"],
       "js": ["content/hotkey-listener.js"],
       "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/overlay/index.html", "overlay/overlay.js", "assets/*"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

@@ -79,23 +79,79 @@ const Overlay: React.FC = () => {
     }
   }, []);
 
-  // Signal to parent (background iframe host) that the React overlay is ready
-  useEffect(() => {
-    try {
-      window.parent.postMessage({ type: 'CLIPPY_OVERLAY_READY' }, '*');
-    } catch {
-      // ignore
-    }
-  }, []);
-
   const isSearchingFolders = query.startsWith('/');
   const isSearchingTags = query.startsWith('#');
 
+  // Filter snippets by domain relevance (same logic as background script)
+  const domainFilteredSnippets = useMemo(() => {
+    if (!host) return snippets;
+
+    // Create scoring system for snippet relevance
+    const scoredSnippets = snippets.map(snippet => {
+      let score = 0;
+      
+      // Check tags for exact domain match (highest priority)
+      if (snippet.tags?.includes(host)) {
+        score += 100;
+      }
+      
+      // Check tags for partial domain match
+      if (snippet.tags?.some(tag => tag.includes(host) || host.includes(tag))) {
+        score += 50;
+      }
+      
+      // Check title for domain match
+      if (snippet.title?.toLowerCase().includes(host.toLowerCase())) {
+        score += 30;
+      }
+      
+      // Check content for domain match
+      if (snippet.text.toLowerCase().includes(host.toLowerCase())) {
+        score += 20;
+      }
+      
+      // Check for subdomain matches (e.g., "github" matches "github.com")
+      const domainParts = host.split('.');
+      const mainDomain = domainParts[0]; // e.g., "github" from "github.com"
+      
+      if (snippet.tags?.some(tag => tag.includes(mainDomain))) {
+        score += 25;
+      }
+      
+      if (snippet.title?.toLowerCase().includes(mainDomain.toLowerCase()) || 
+          snippet.text.toLowerCase().includes(mainDomain.toLowerCase())) {
+        score += 15;
+      }
+      
+      return { snippet, score };
+    });
+
+    // Sort by score (highest first), then by lastUsed, then by creation date
+    scoredSnippets.sort((a, b) => {
+      if (a.score !== b.score) return b.score - a.score;
+      
+      if (a.snippet.lastUsed && b.snippet.lastUsed) {
+        return new Date(b.snippet.lastUsed).getTime() - new Date(a.snippet.lastUsed).getTime();
+      }
+      if (a.snippet.lastUsed && !b.snippet.lastUsed) return -1;
+      if (!a.snippet.lastUsed && b.snippet.lastUsed) return 1;
+      
+      return new Date(b.snippet.createdAt).getTime() - new Date(a.snippet.createdAt).getTime();
+    });
+
+    // Return snippets with domain-relevant ones first, then all others
+    const domainRelevant = scoredSnippets.filter(s => s.score > 0).map(s => s.snippet);
+    const others = scoredSnippets.filter(s => s.score === 0).map(s => s.snippet);
+    
+    return [...domainRelevant, ...others];
+  }, [snippets, host]);
+
   const filteredResults = useMemo(() => {
     const lowerCaseQuery = query.toLowerCase().trim();
+    const sourceSnippets = domainFilteredSnippets; // Use domain-filtered snippets as base
 
     if (activeFolder) {
-      return snippets.filter(s => s.folderId === activeFolder.id && s.text.toLowerCase().includes(lowerCaseQuery));
+      return sourceSnippets.filter(s => s.folderId === activeFolder.id && s.text.toLowerCase().includes(lowerCaseQuery));
     }
 
     if (isSearchingFolders) {
@@ -105,10 +161,15 @@ const Overlay: React.FC = () => {
 
     if (isSearchingTags) {
       const tagQuery = lowerCaseQuery.substring(1);
-      return snippets.filter(s => s.tags?.some(tag => tag.toLowerCase().includes(tagQuery)));
+      return sourceSnippets.filter(s => s.tags?.some(tag => tag.toLowerCase().includes(tagQuery)));
     }
 
-    return snippets.filter(s => {
+    if (!lowerCaseQuery) {
+      // No search query - return all domain-filtered snippets
+      return sourceSnippets;
+    }
+
+    return sourceSnippets.filter(s => {
       const folder = folders.find(f => f.id === s.folderId);
       const tagMatch = s.tags?.some(tag => tag.toLowerCase().includes(lowerCaseQuery));
       return s.title?.toLowerCase().includes(lowerCaseQuery) ||
@@ -116,7 +177,7 @@ const Overlay: React.FC = () => {
              folder?.name.toLowerCase().includes(lowerCaseQuery) ||
              tagMatch;
     });
-  }, [query, snippets, folders, activeFolder, isSearchingFolders, isSearchingTags]);
+  }, [query, domainFilteredSnippets, folders, activeFolder, isSearchingFolders, isSearchingTags]);
 
   useEffect(() => {
     setSelectedIndex(0);
