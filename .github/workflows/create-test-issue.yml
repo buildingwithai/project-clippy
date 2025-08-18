@@ -29,7 +29,7 @@ jobs:
         id: create
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.PROJECT_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const title = core.getInput('title');
             const body = `
@@ -118,6 +118,42 @@ jobs:
             });
             core.setOutput('issue_node_id', issue.node_id);
             core.setOutput('issue_number', issue.number.toString());
+      - name: Debug Project fields (title and Status options)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const ownerLogin = core.getInput('project_owner');
+            const projectNumber = parseInt(core.getInput('project_number'), 10);
+            const data = await github.graphql(`
+              query($login: String!, $number: Int!) {
+                user(login: $login) {
+                  projectV2(number: $number) {
+                    id
+                    title
+                    fields(first: 50) {
+                      nodes {
+                        ... on ProjectV2FieldCommon { id name }
+                        ... on ProjectV2SingleSelectField { id name options { id name } }
+                      }
+                    }
+                  }
+                }
+              }
+            `, { login: ownerLogin, number: projectNumber });
+            if (!data?.user?.projectV2) {
+              core.setFailed(`Project not found for owner=${ownerLogin} number=${projectNumber}`);
+            } else {
+              const proj = data.user.projectV2;
+              core.notice(`Project title: ${proj.title}`);
+              const statusField = proj.fields.nodes.find(f => f.name === 'Status' && f.options);
+              if (!statusField) core.setFailed('Status field not found');
+              else {
+                core.notice('Status options:');
+                for (const opt of statusField.options) core.notice(`- ${opt.name}`);
+              }
+            }
+
       - name: Add Issue to Project and set Status=Planned
         uses: actions/github-script@v7
         with:
