@@ -1,0 +1,165 @@
+name: Backfill Project Items
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_numbers:
+        description: "Comma-separated list of issue numbers (e.g., 12,15,16). Ignored if 'label' is provided."
+        required: false
+        type: string
+      label:
+        description: "Label to select issues to backfill (e.g., feature). If provided, all issues with this label are processed."
+        required: false
+        type: string
+      status:
+        description: "Status to set (Planned, In Progress, Done). Leave empty to auto-map: open=>Planned, closed=>Done."
+        required: false
+        type: string
+      project_owner:
+        description: "GitHub username that owns the Project"
+        required: true
+        default: "buildingwithai"
+      project_number:
+        description: "Project number (from URL /projects/<number>)"
+        required: true
+        default: "1"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Backfill issues into Project and set Status
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const ownerLogin = '${{ inputs.project_owner }}';
+            const projectNumber = parseInt('${{ inputs.project_number }}', 10);
+            const statusInput = ('${{ inputs.status }}' || '').trim();
+            const label = ('${{ inputs.label }}' || '').trim();
+            const list = ('${{ inputs.issue_numbers }}' || '').trim();
+
+            // Helper: fetch all issues by label if provided, else parse numbers
+            async function getIssueNumbers() {
+              if (label) {
+                const numbers = [];
+                let page = 1;
+                while (true) {
+                  const { data } = await github.rest.issues.listForRepo({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    labels: label,
+                    state: 'all',
+                    per_page: 100,
+                    page,
+                  });
+                  if (!data.length) break;
+                  for (const it of data) numbers.push(it.number);
+                  if (data.length < 100) break;
+                  page += 1;
+                }
+                return numbers;
+              }
+              if (!list) return [];
+              return list.split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isFinite(n));
+            }
+
+            // Load Project + Status field/options
+            const projectData = await github.graphql(`
+              query($login: String!, $number: Int!) {
+                user(login: $login) {
+                  projectV2(number: $number) {
+                    id
+                    title
+                    fields(first: 50) {
+                      nodes {
+                        ... on ProjectV2FieldCommon { id name }
+                        ... on ProjectV2SingleSelectField { id name options { id name } }
+                      }
+                    }
+                  }
+                }
+              }
+            `, { login: ownerLogin, number: projectNumber });
+            const project = projectData?.user?.projectV2;
+            if (!project) {
+              core.setFailed('Project not found');
+              return;
+            }
+            core.notice(`Project title: ${project.title}`);
+
+            const statusField = project.fields.nodes.find(f => f.name === 'Status' && f.options);
+            if (!statusField) {
+              core.setFailed('Status field not found in Project');
+              return;
+            }
+            const findStatusId = (name) => {
+              const opt = statusField.options.find(o => o.name.toLowerCase() === String(name).toLowerCase());
+              return opt?.id;
+            };
+
+            const issueNumbers = await getIssueNumbers();
+            if (!issueNumbers.length) {
+              core.setFailed('No issues to process. Provide issue_numbers or label input.');
+              return;
+            }
+            core.notice(`Processing issues: ${issueNumbers.join(', ')}`);
+
+            for (const num of issueNumbers) {
+              try {
+                const { data: issue } = await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: num,
+                });
+
+                const desiredStatus = statusInput || (issue.state === 'closed' ? 'Done' : 'Planned');
+                const optionId = findStatusId(desiredStatus);
+                if (!optionId) {
+                  core.warning(`Skipping #${num}: Status option not found: ${desiredStatus}`);
+                  continue;
+                }
+
+                // Add to project
+                let itemId = null;
+                try {
+                  const addRes = await github.graphql(`
+                    mutation($projectId: ID!, $contentId: ID!) {
+                      addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                        item { id }
+                      }
+                    }
+                  `, { projectId: project.id, contentId: issue.node_id });
+                  itemId = addRes.addProjectV2ItemById.item.id;
+                } catch (e) {
+                  core.warning(`addProjectV2ItemById failed for #${num} (possibly already added): ${e?.errors?.[0]?.message || e.message}`);
+                  // Best-effort: skip to status update not possible without itemId. Continue next.
+                  continue;
+                }
+
+                // Set Status
+                await github.graphql(`
+                  mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                    updateProjectV2ItemFieldValue(input: {
+                      projectId: $projectId,
+                      itemId: $itemId,
+                      fieldId: $fieldId,
+                      value: { singleSelectOptionId: $optionId }
+                    }) { clientMutationId }
+                  }
+                `, {
+                  projectId: project.id,
+                  itemId,
+                  fieldId: statusField.id,
+                  optionId,
+                });
+
+                core.notice(`Backfilled #${num} => Status=${desiredStatus}`);
+              } catch (err) {
+                core.warning(`Failed processing #${num}: ${err.message}`);
+              }
+            }

@@ -1,0 +1,107 @@
+name: Ensure Feature Issue Body Completeness
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to ensure body completeness"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  ensure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure sections exist and update issue body
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue_number = parseInt('${{ inputs.issue_number }}', 10);
+            if (Number.isNaN(issue_number)) {
+              core.setFailed('Invalid or missing issue_number input');
+              return;
+            }
+
+            const { data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+            });
+
+            const original = issue.body || '';
+
+            // Sections we want to enforce
+            const sections = [
+              {
+                key: 'Goal',
+                scaffold: 'Goal\n\n[Describe the single outcome this feature seeks to achieve]\n'
+              },
+              {
+                key: 'Audience & Value',
+                scaffold: 'Audience & Value\n\nCustomer Success\n- Problem:\n- Value:\n- Proof:\n\nSales\n- Problem:\n- Value:\n- Proof:\n\nRecruiting\n- Problem:\n- Value:\n- Proof:\n'
+              },
+              {
+                key: 'User Stories (by audience)',
+                scaffold: 'User Stories (by audience)\n\nCustomer Success\n- Story:\n- Acceptance:\n  - [ ] ...\n\nSales\n- Story:\n- Acceptance:\n  - [ ] ...\n\nRecruiting\n- Story:\n- Acceptance:\n  - [ ] ...\n'
+              },
+              {
+                key: 'Click-by-Click (How to use)',
+                scaffold: 'Click-by-Click (How to use)\n\n1. ...\n2. ...\n3. ...\n'
+              },
+              {
+                key: 'Acceptance Criteria',
+                scaffold: 'Acceptance Criteria\n\n- [ ] ...\n- [ ] ...\n- [ ] ...\n'
+              },
+              {
+                key: 'Roadblocks & Attempts',
+                scaffold: 'Roadblocks & Attempts\n\nErrors/Symptoms:\n- ...\nAttempts:\n- ...\nWhy Failed:\n- ...\nWhat Worked:\n- ...\n'
+              },
+              {
+                key: 'Technical Notes',
+                scaffold: 'Technical Notes\n\n- Code areas:\n- Security/CSP:\n- Perf:\n'
+              },
+              {
+                key: 'Release Notes & Rollback',
+                scaffold: 'Release Notes & Rollback\n\n- Release:\n- Rollback:\n'
+              },
+              {
+                key: 'Artifacts',
+                scaffold: 'Artifacts\n\n- GIF/Screens:\n- PRs:\n- Related:\n'
+              },
+            ];
+
+            let body = original.trim();
+            for (const s of sections) {
+              if (!new RegExp(`(^|\n)${s.key}(\n|$)`, 'i').test(body)) {
+                body += (body ? '\n\n' : '') + s.scaffold.trim();
+              }
+            }
+
+            if (body !== original.trim()) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body,
+              });
+              core.notice(`Updated issue #${issue_number} with missing sections.`);
+            } else {
+              core.notice('All sections already present; no update needed.');
+            }
+
+            // Ensure 'feature' label exists on the issue
+            const hasFeatureLabel = (issue.labels || []).some(l => (typeof l === 'string' ? l === 'feature' : l.name === 'feature'));
+            if (!hasFeatureLabel) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                labels: ['feature'],
+              });
+              core.notice("Added 'feature' label to issue.");
+            }

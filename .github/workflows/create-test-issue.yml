@@ -19,7 +19,6 @@ on:
 permissions:
   contents: read
   issues: write
-  projects: write
 
 jobs:
   create_issue_and_add_to_project:
@@ -31,7 +30,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const title = core.getInput('title');
+            const title = '${{ inputs.title }}';
             const body = `
             Goal\n
             Ensure hotkeys 1–4 paste versioned text/HTML reliably across frames and rich editors without unserializable argument errors.\n
@@ -123,8 +122,8 @@ jobs:
         with:
           github-token: ${{ secrets.PROJECT_TOKEN }}
           script: |
-            const ownerLogin = core.getInput('project_owner');
-            const projectNumber = parseInt(core.getInput('project_number'), 10);
+            const ownerLogin = '${{ inputs.project_owner }}';
+            const projectNumber = parseInt('${{ inputs.project_number }}', 10);
             const data = await github.graphql(`
               query($login: String!, $number: Int!) {
                 user(login: $login) {
@@ -159,8 +158,8 @@ jobs:
         with:
           github-token: ${{ secrets.PROJECT_TOKEN }}
           script: |
-            const ownerLogin = core.getInput('project_owner');
-            const projectNumber = parseInt(core.getInput('project_number'), 10);
+            const ownerLogin = '${{ inputs.project_owner }}';
+            const projectNumber = parseInt('${{ inputs.project_number }}', 10);
             const contentId = core.getInput('issue_node_id') || '${{ steps.create.outputs.issue_node_id }}';
 
             const projectData = await github.graphql(`
