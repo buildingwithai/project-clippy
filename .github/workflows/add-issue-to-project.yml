@@ -27,7 +27,11 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const issue_number = parseInt(core.getInput('issue_number'), 10);
+            const issue_number = parseInt('${{ inputs.issue_number }}', 10);
+            if (Number.isNaN(issue_number)) {
+              core.setFailed('Invalid or missing issue_number input');
+              return;
+            }
             const { data } = await github.rest.issues.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -41,7 +45,7 @@ jobs:
           script: |
             const ownerLogin = 'buildingwithai';
             const projectNumber = 1; // https://github.com/users/buildingwithai/projects/1
-            const desiredStatus = core.getInput('status') || 'Planned';
+            const desiredStatus = '${{ inputs.status }}' || 'Planned';
 
             const contentId = '${{ steps.res.outputs.node_id }}';
 
