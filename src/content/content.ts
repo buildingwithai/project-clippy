@@ -189,7 +189,7 @@ function showVariablesPopover(
   cancelBtn.addEventListener('click', () => close(false));
   closeBtn.addEventListener('click', () => close(false));
 
-  document.addEventListener('keydown', onKeyDown, true);
+  document.addEventListener('keydown', onKeyDown, false); // Changed from true to false
 
   function submit() {
     const vals: Record<string, string> = {};
@@ -374,15 +374,15 @@ document.addEventListener('keydown', (e) => {
   const isCmdOrCtrl = e.metaKey || e.ctrlKey;
   if (isCmdOrCtrl && e.shiftKey && e.code === 'Space') {
     console.log('[Clippy Content] Keyboard shortcut triggered - Cmd+Shift+Space');
+    // Only prevent default for our specific shortcut to avoid interfering with LinkedIn
     e.preventDefault();
-    e.stopPropagation();
     openTray();
   }
   // Debug all keydowns with modifiers
   if (isCmdOrCtrl && e.shiftKey) {
     console.log(`[Clippy Content] Key pressed: ${e.code} (looking for Space)`);
   }
-}, true);
+}, false); // Changed from true to false to be less aggressive
 
 function ensureInputBubble() {
   if (inputBubbleEl) return inputBubbleEl;
@@ -418,8 +418,8 @@ function ensureInputBubble() {
 
   el.addEventListener('click', (e) => {
     console.log('[Clippy Content] Input bubble clicked');
+    // Only prevent default, don't stop propagation to avoid LinkedIn interference
     e.preventDefault();
-    e.stopPropagation();
     openTray();
   });
   
@@ -436,8 +436,8 @@ function ensureInputBubble() {
     const rect = el.getBoundingClientRect();
     dragOffsetX = e.clientX - rect.left;
     dragOffsetY = e.clientY - rect.top;
+    // Only prevent default for our bubble interaction
     e.preventDefault();
-    e.stopPropagation();
   });
   
   el.addEventListener('pointermove', (e) => {

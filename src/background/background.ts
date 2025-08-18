@@ -385,6 +385,15 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         await chrome.storage.local.set({ pendingSnippetText: info.selectionText });
       }
       
+      // Auto-capture source URL for snippet
+      try {
+        const sourceUrl = tab.url;
+        console.log('[Clippy] Auto-capturing source URL:', sourceUrl);
+        await chrome.storage.local.set({ pendingSnippetUrl: sourceUrl });
+      } catch (error) {
+        console.warn('[Clippy] Failed to capture source URL:', error);
+      }
+      
       console.log('[Clippy] Attempting to open popup with pending text...');
       try {
         await chrome.action.openPopup();
@@ -1720,6 +1729,9 @@ function filterSnippetsByDomain(allSnippets: Snippet[], domain: string): Snippet
 function executeToggleOverlay(originX?: number | null, originY?: number | null, forceDomFallback?: boolean) {
   console.log('[Clippy] executeToggleOverlay called with:', { originX, originY, forceDomFallback });
   
+  // Check if we're accidentally creating invalid extension URLs
+  console.log('[Clippy] Extension ID check:', typeof chrome !== 'undefined' ? chrome.runtime.id : 'chrome undefined');
+  
   try {
     const CONTAINER_ID = 'clippy-search-overlay-container';
     
@@ -1815,30 +1827,25 @@ function executeToggleOverlay(originX?: number | null, originY?: number | null, 
         return;
       }
       
-      // Force focus back to search input if any other input tries to steal it
-      if (e.target !== searchInput && searchInput) {
+      // Force focus back to search input if LinkedIn tries to steal it
+      if (e.target !== searchInput && searchInput && e.target !== overlay) {
         setTimeout(() => {
           (searchInput as HTMLInputElement).focus();
         }, 0);
       }
     };
     
-    // Capture all keyboard events before the site can
+    // Only capture keyboard events that affect our modal
     document.addEventListener('keydown', handleKeydown, true);
-    document.addEventListener('keyup', (e) => {
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-    }, true);
-    document.addEventListener('keypress', (e) => {
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-    }, true);
+    
+    // Don't interfere with other events that could break LinkedIn's functionality
     
     // Also add to overlay
     overlay.addEventListener('keydown', handleKeydown, true);
 
     // Load and display snippets with search functionality
     let allSnippets: any[] = [];
+    let allFolders: any[] = [];
     let filteredSnippets: any[] = [];
     
     const renderSnippets = (snippetsToRender: any[]) => {
@@ -1872,6 +1879,7 @@ function executeToggleOverlay(originX?: number | null, originY?: number | null, 
 
     const filterAndSortSnippets = (searchTerm: string = '') => {
       const domain = location.hostname.replace('www.', '');
+      console.log('[Clippy] Filtering snippets for domain:', domain, 'Total snippets:', allSnippets.length);
       
       // Filter by search term
       let filtered = allSnippets;
@@ -1884,28 +1892,62 @@ function executeToggleOverlay(originX?: number | null, originY?: number | null, 
         });
       }
 
-      // Sort by domain relevance using the proper scoring algorithm
+      // Use the folders already loaded
+
+      // Sort by domain relevance using enhanced scoring algorithm
       const sortedSnippets = filtered.sort((a: any, b: any) => {
         let scoreA = 0;
         let scoreB = 0;
         
-        // Check tags for exact domain match (highest priority)
+        // FOLDER-BASED SCORING (highest priority - 150 points)
+        const folderA = allFolders.find((f: any) => f.id === a.folderId);
+        const folderB = allFolders.find((f: any) => f.id === b.folderId);
+        
+        if (folderA?.name) {
+          const folderName = folderA.name.toLowerCase();
+          // Check if folder name contains domain keyword (case-insensitive)
+          if (folderName.includes(domain.toLowerCase()) || 
+              domain.toLowerCase().includes(folderName) ||
+              folderName.includes(domain.split('.')[0]?.toLowerCase() || '')) {
+            scoreA += 150;
+          }
+        }
+        
+        if (folderB?.name) {
+          const folderName = folderB.name.toLowerCase();
+          // Check if folder name contains domain keyword (case-insensitive)
+          if (folderName.includes(domain.toLowerCase()) || 
+              domain.toLowerCase().includes(folderName) ||
+              folderName.includes(domain.split('.')[0]?.toLowerCase() || '')) {
+            scoreB += 150;
+          }
+        }
+        
+        // Check source domain for exact match (120 points - higher than tags)
+        if (a.sourceDomain === domain) scoreA += 120;
+        if (b.sourceDomain === domain) scoreB += 120;
+        
+        // Check source domain for partial match (60 points)
+        if (a.sourceDomain && (a.sourceDomain.includes(domain) || domain.includes(a.sourceDomain))) scoreA += 60;
+        if (b.sourceDomain && (b.sourceDomain.includes(domain) || domain.includes(b.sourceDomain))) scoreB += 60;
+        
+        // Check tags for exact domain match (100 points)
         if (a.tags?.includes(domain)) scoreA += 100;
         if (b.tags?.includes(domain)) scoreB += 100;
         
-        // Check tags for partial domain match
+        // Check tags for partial domain match (50 points)
         if (a.tags?.some((tag: string) => tag.includes(domain) || domain.includes(tag))) scoreA += 50;
         if (b.tags?.some((tag: string) => tag.includes(domain) || domain.includes(tag))) scoreB += 50;
         
-        // Check title for domain match
+        // Check title for domain match (30 points)
         if (a.title?.toLowerCase().includes(domain.toLowerCase())) scoreA += 30;
         if (b.title?.toLowerCase().includes(domain.toLowerCase())) scoreB += 30;
         
-        // Check content for domain match
+        // Check content for domain match (20 points)
         if (a.text.toLowerCase().includes(domain.toLowerCase())) scoreA += 20;
         if (b.text.toLowerCase().includes(domain.toLowerCase())) scoreB += 20;
         
-        // Check for subdomain matches
+        // Check for subdomain matches (10 points)
         const domainParts = domain.split('.');
         const mainDomain = domainParts[0];
         if (mainDomain && mainDomain !== domain) {
@@ -1926,6 +1968,12 @@ function executeToggleOverlay(originX?: number | null, originY?: number | null, 
         return (b.frequency || 0) - (a.frequency || 0);
       });
 
+      // Debug logging for domain filtering
+      console.log('[Clippy] Domain filtering results for', domain + ':');
+      sortedSnippets.slice(0, 5).forEach((snippet: any, i: number) => {
+        console.log(`  ${i+1}. "${snippet.title || snippet.text.substring(0, 30)}" - sourceDomain: ${snippet.sourceDomain}`);
+      });
+
       return sortedSnippets;
     };
 
@@ -1938,10 +1986,11 @@ function executeToggleOverlay(originX?: number | null, originY?: number | null, 
       });
     }
 
-    // Load snippets initially
+    // Load snippets and folders initially
     if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.get(['snippets'], (result) => {
+      chrome.storage.local.get(['snippets', 'folders'], (result) => {
         allSnippets = result.snippets || [];
+        allFolders = result.folders || [];
         filteredSnippets = filterAndSortSnippets();
         renderSnippets(filteredSnippets);
       });
@@ -1999,7 +2048,7 @@ function executeToggleOverlay(originX?: number | null, originY?: number | null, 
       }
     };
     
-    // Start aggressive focusing
+    // Re-enable aggressive focusing for LinkedIn compatibility
     setTimeout(continuousFocus, 10);
     setTimeout(continuousFocus, 50);
     setTimeout(continuousFocus, 150);
@@ -2010,14 +2059,12 @@ function executeToggleOverlay(originX?: number | null, originY?: number | null, 
     if (searchInput) {
       const input = searchInput as HTMLInputElement;
       
-      // Click handler
+      // Re-enable focus event handlers with reduced event interference
       input.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.stopImmediatePropagation();
+        // Don't stop propagation to avoid LinkedIn interference
         setTimeout(focusSearchInput, 10);
       });
       
-      // Blur prevention
       input.addEventListener('blur', (e) => {
         console.log('[Clippy] Input blurred, attempting refocus...');
         if (document.querySelector('#clippy-search-overlay-container')) {
@@ -2025,9 +2072,8 @@ function executeToggleOverlay(originX?: number | null, originY?: number | null, 
         }
       });
       
-      // Mousedown handler to ensure focus
       input.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
+        // Reduced event interference
         setTimeout(focusSearchInput, 0);
       });
       

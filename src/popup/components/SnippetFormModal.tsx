@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SimpleRichEditor } from '@/components/ui/simple-rich-editor';
 
 import type { Snippet, Folder } from '../../utils/types';
+import { extractDomain } from '../../utils/url-helpers';
 
 interface SnippetFormModalProps {
   isOpen: boolean;
@@ -21,6 +22,8 @@ interface SnippetFormModalProps {
     folderId: string | null;
     isNewVersion?: boolean;
     originalSnippetId?: string;
+    sourceUrl?: string;
+    sourceDomain?: string;
   }) => void;
   snippetToEdit?: Snippet | null;
   initialText?: string; // New: text to pre-populate when creating a new snippet
@@ -42,6 +45,7 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
   const [text, setText] = useState('');
   const [html, setHtml] = useState<string | undefined>(undefined);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [sourceUrl, setSourceUrl] = useState('');
   const [useSimpleEditor, setUseSimpleEditor] = useState(false);
   const [isCreatingNewVersion, setIsCreatingNewVersion] = useState(false);
   const [versionMode, setVersionMode] = useState<'edit' | 'create'>('edit');
@@ -66,13 +70,14 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
       setText(originalText);
       setHtml(originalHtml);
       setSelectedFolderId(snippetToEdit.folderId || null);
+      setSourceUrl(snippetToEdit.sourceUrl || '');
       setVersionMode('edit'); // Always start in edit mode when editing
       setVersionTitle(''); // Clear version title
       
       // Store the original content for restoration
       setSavedContent({ text: originalText, html: originalHtml, title: snippetToEdit.title || '' });
     } else {
-      // Creating new snippet
+      // Creating new snippet - auto-populate URL from pending data or current tab
       setTitle('');
       setText(initialText || '');
       setHtml(initialHtml || undefined);
@@ -80,6 +85,18 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
       setVersionMode('edit'); // Reset to edit mode for new snippets
       setVersionTitle(''); // Clear version title
       setSavedContent({ text: '', html: undefined, title: '' }); // Clear saved content
+      
+      // Auto-populate URL from storage or current tab
+      const loadInitialUrl = async () => {
+        try {
+          const result = await chrome.storage.local.get('pendingSnippetUrl');
+          setSourceUrl(result.pendingSnippetUrl || '');
+        } catch (error) {
+          console.warn('Error loading pending URL:', error);
+          setSourceUrl('');
+        }
+      };
+      loadInitialUrl();
       // Don't reset createModeContent - preserve any previously typed content
     }
     
@@ -152,6 +169,8 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
       isNewVersion: isCreatingNewVersion || undefined,
       originalSnippetId: isCreatingNewVersion ? snippetToEdit?.id : undefined,
       versionTitle: versionTitle.trim() || undefined, // Include version-specific title
+      sourceUrl: sourceUrl.trim() || undefined,
+      sourceDomain: sourceUrl.trim() ? (extractDomain(sourceUrl.trim()) || undefined) : undefined,
     };
     onSave(snippetData);
     onClose();
@@ -266,6 +285,19 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
               </div>
             </div>
           )}
+          
+          {/* Source URL field */}
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <Input
+                id="source-url"
+                value={sourceUrl}
+                onChange={(e) => setSourceUrl(e.target.value)}
+                className="h-9 bg-slate-800/50 text-slate-100 border-slate-700/50 placeholder:text-slate-500 text-sm focus-visible:ring-1 focus-visible:ring-sky-500"
+                placeholder="Source URL (auto-captured)..."
+              />
+            </div>
+          </div>
           
           {/* Content editor - clean and focused */}
           <div className="space-y-2">
