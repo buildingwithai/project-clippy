@@ -34,3 +34,7 @@ This project is built with Vite, React, TypeScript, Tailwind CSS, and shadcn/ui.
 To build the extension for production:
 `npm run build`
 This will create a `dist` folder ready to be packed or loaded into Chrome.
+
+---
+
+Note: This line verifies project automation on PR open/close.
