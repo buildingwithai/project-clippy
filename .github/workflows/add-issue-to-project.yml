@@ -16,7 +16,6 @@ on:
 permissions:
   contents: read
   issues: write
-  projects: write
 
 jobs:
   add_issue:
