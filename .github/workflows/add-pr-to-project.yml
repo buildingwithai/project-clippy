@@ -34,7 +34,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
           script: |
-            const raw = (core.getInput('pr_number') || '').trim();
+            const raw = '${{ inputs.pr_number }}'.trim();
             let prNumber = NaN;
             if (/^https?:\/\//i.test(raw)) {
               const m = raw.match(/\/pull\/(\d+)/);
@@ -74,9 +74,9 @@ jobs:
           github-token: ${{ secrets.PROJECT_TOKEN }}
           script: |
             function normalize(s) { return (s || '').trim().toLowerCase(); }
-            const statusInput = (core.getInput('status') || '').trim();
-            const ownerLogin = (core.getInput('project_owner') || context.repo.owner).trim();
-            const projectNumber = parseInt(core.getInput('project_number') || '1');
+            const statusInput = '${{ inputs.status }}'.trim();
+            const ownerLogin = ('${{ inputs.project_owner }}' || context.repo.owner).trim();
+            const projectNumber = parseInt('${{ inputs.project_number }}' || '1', 10);
 
             const prNodeId = process.env.PR_NODE_ID;
             const prNumber = parseInt(process.env.PR_NUMBER, 10);
