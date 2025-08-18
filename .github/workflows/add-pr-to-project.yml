@@ -28,26 +28,61 @@ jobs:
   add_pr_to_project:
     runs-on: ubuntu-latest
     steps:
-      - name: Add PR to Project and set Status
+      - name: Validate and fetch PR details
+        id: get_pr
         uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const raw = (core.getInput('pr_number') || '').trim();
+            let prNumber = NaN;
+            if (/^https?:\/\//i.test(raw)) {
+              const m = raw.match(/\/pull\/(\d+)/);
+              if (m) prNumber = parseInt(m[1], 10);
+            } else {
+              const cleaned = raw.replace(/^#/, '');
+              prNumber = parseInt(cleaned, 10);
+            }
+            if (!Number.isInteger(prNumber) || prNumber <= 0) {
+              core.setFailed(`Invalid pr_number: '${raw}'. Provide a number like 19 or a PR URL.`);
+              return;
+            }
+            core.info(`Fetching PR ${context.repo.owner}/${context.repo.repo}#${prNumber} ...`);
+            try {
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+              });
+              core.setOutput('number', String(prNumber));
+              core.setOutput('node_id', pr.node_id);
+              core.setOutput('is_merged', pr.merged_at ? 'true' : 'false');
+              core.setOutput('state', pr.state);
+            } catch (e) {
+              core.setFailed(`Failed to fetch PR #${prNumber}: ${e.status || ''} ${e.message}`);
+            }
+
+      - name: Add PR to Project and set Status
+        if: steps.get_pr.outputs.node_id != ''
+        uses: actions/github-script@v7
+        env:
+          PR_NODE_ID: ${{ steps.get_pr.outputs.node_id }}
+          PR_IS_MERGED: ${{ steps.get_pr.outputs.is_merged }}
+          PR_STATE: ${{ steps.get_pr.outputs.state }}
+          PR_NUMBER: ${{ steps.get_pr.outputs.number }}
         with:
           github-token: ${{ secrets.PROJECT_TOKEN }}
           script: |
-            const prNumber = parseInt(core.getInput('pr_number'));
+            function normalize(s) { return (s || '').trim().toLowerCase(); }
             const statusInput = (core.getInput('status') || '').trim();
             const ownerLogin = (core.getInput('project_owner') || context.repo.owner).trim();
             const projectNumber = parseInt(core.getInput('project_number') || '1');
 
-            function normalize(s) { return (s || '').trim().toLowerCase(); }
+            const prNodeId = process.env.PR_NODE_ID;
+            const prNumber = parseInt(process.env.PR_NUMBER, 10);
+            const desiredStatus = statusInput || (process.env.PR_IS_MERGED === 'true' ? 'Done' : (process.env.PR_STATE === 'closed' ? 'Done' : 'In Progress'));
 
-            // 1) Fetch PR
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber,
-            });
-
-            // 2) Resolve Project and Status field/options
+            // Resolve Project and Status field/options
             const projectQuery = `
               query($login: String!, $number: Int!) {
                 organization(login: $login) {
@@ -89,21 +124,18 @@ jobs:
               core.setFailed('Project Status field not found.');
               return;
             }
-
             const findStatusId = (label) => {
               const want = normalize(label);
               const opt = statusField.options.find(o => normalize(o.name) === want);
               return opt?.id || null;
             };
-
-            const desiredStatus = statusInput || (pr.merged_at ? 'Done' : (pr.state === 'closed' ? 'Done' : 'In Progress'));
             const optionId = findStatusId(desiredStatus);
             if (!optionId) {
               core.setFailed(`Status option not found: ${desiredStatus}`);
               return;
             }
 
-            // 3) Add PR to Project (or find existing item)
+            // Add PR to Project (or find existing item)
             let itemId = null;
             try {
               const addRes = await github.graphql(`
@@ -112,20 +144,17 @@ jobs:
                     item { id }
                   }
                 }
-              `, { projectId: project.id, contentId: pr.node_id });
+              `, { projectId: project.id, contentId: prNodeId });
               itemId = addRes.addProjectV2ItemById.item.id;
             } catch (e) {
               core.warning(`addProjectV2ItemById failed for PR #${prNumber} (possibly already added): ${e?.errors?.[0]?.message || e.message}`);
-              // Lookup existing item for this PR in the target Project
               try {
                 const lookup = await github.graphql(`
                   query($owner: String!, $repo: String!, $number: Int!) {
                     repository(owner: $owner, name: $repo) {
                       pullRequest(number: $number) {
                         id
-                        projectItems(first: 20) {
-                          nodes { id project { id } }
-                        }
+                        projectItems(first: 20) { nodes { id project { id } } }
                       }
                     }
                   }
@@ -144,7 +173,7 @@ jobs:
               }
             }
 
-            // 4) Update Status field
+            // Update Status field
             await github.graphql(`
               mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
                 updateProjectV2ItemFieldValue(input: {
