@@ -34,7 +34,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
           script: |
-            const raw = (core.getInput('pr_number') || '').trim();
+            const raw = '${{ inputs.pr_number }}'.trim();
             let prNumber = NaN;
             if (/^https?:\/\//i.test(raw)) {
               const m = raw.match(/\/pull\/(\d+)/);
@@ -74,46 +74,52 @@ jobs:
           github-token: ${{ secrets.PROJECT_TOKEN }}
           script: |
             function normalize(s) { return (s || '').trim().toLowerCase(); }
-            const statusInput = (core.getInput('status') || '').trim();
-            const ownerLogin = (core.getInput('project_owner') || context.repo.owner).trim();
-            const projectNumber = parseInt(core.getInput('project_number') || '1');
+            const statusInput = '${{ inputs.status }}'.trim();
+            const ownerLogin = ('${{ inputs.project_owner }}' || context.repo.owner).trim();
+            const projectNumber = parseInt('${{ inputs.project_number }}' || '1', 10);
 
             const prNodeId = process.env.PR_NODE_ID;
             const prNumber = parseInt(process.env.PR_NUMBER, 10);
             const desiredStatus = statusInput || (process.env.PR_IS_MERGED === 'true' ? 'Done' : (process.env.PR_STATE === 'closed' ? 'Done' : 'In Progress'));
 
             // Resolve Project and Status field/options
-            const projectQuery = `
-              query($login: String!, $number: Int!) {
-                organization(login: $login) {
-                  projectV2(number: $number) {
-                    id
-                    title
-                    fields(first: 50) {
-                      nodes {
-                        ... on ProjectV2FieldCommon { id name }
-                        ... on ProjectV2SingleSelectField { id name options { id name } }
-                      }
-                    }
-                  }
-                }
-                user(login: $login) {
-                  projectV2(number: $number) {
-                    id
-                    title
-                    fields(first: 50) {
-                      nodes {
-                        ... on ProjectV2FieldCommon { id name }
-                        ... on ProjectV2SingleSelectField { id name options { id name } }
-                      }
-                    }
-                  }
+            let isOrg = false;
+            try {
+              const { data: u } = await github.rest.users.getByUsername({ username: ownerLogin });
+              isOrg = (u.type === 'Organization');
+            } catch (e) {
+              core.warning(`Owner lookup failed for ${ownerLogin}, assuming User. ${e.status || ''} ${e.message}`);
+            }
+
+            const baseFields = `
+              id
+              title
+              fields(first: 50) {
+                nodes {
+                  ... on ProjectV2FieldCommon { id name }
+                  ... on ProjectV2SingleSelectField { id name options { id name } }
                 }
               }
             `;
 
-            const pdata = await github.graphql(projectQuery, { login: ownerLogin, number: projectNumber });
-            const project = pdata.organization?.projectV2 || pdata.user?.projectV2;
+            let project = null;
+            if (isOrg) {
+              const q = `
+                query($login: String!, $number: Int!) {
+                  organization(login: $login) { projectV2(number: $number) { ${baseFields} } }
+                }
+              `;
+              const pdata = await github.graphql(q, { login: ownerLogin, number: projectNumber });
+              project = pdata?.organization?.projectV2 || null;
+            } else {
+              const q = `
+                query($login: String!, $number: Int!) {
+                  user(login: $login) { projectV2(number: $number) { ${baseFields} } }
+                }
+              `;
+              const pdata = await github.graphql(q, { login: ownerLogin, number: projectNumber });
+              project = pdata?.user?.projectV2 || null;
+            }
             if (!project?.id) {
               core.setFailed(`Project not found for owner=${ownerLogin} number=${projectNumber}`);
               return;

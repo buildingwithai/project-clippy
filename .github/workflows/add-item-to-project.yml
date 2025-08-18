@@ -1,0 +1,132 @@
+name: Add Issue or PR to Project
+
+on:
+  workflow_dispatch:
+    inputs:
+      number:
+        description: "Issue or PR number (e.g., 15 or 19)"
+        required: true
+        type: string
+      status:
+        description: "Optional Status to set on the Project item (e.g., Planned, In Progress, Done). If omitted, derives automatically."
+        required: false
+        type: string
+        default: ""
+      project_owner:
+        description: "Owner login of the Project (user or org)"
+        required: true
+        type: string
+        default: "buildingwithai"
+      project_number:
+        description: "Project number"
+        required: true
+        type: number
+        default: 1
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  add_item:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add Issue or PR to Project and set Status
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const rawNumber = '${{ inputs.number }}'.replace(/[#]/g, '').trim();
+            const itemNumber = parseInt(rawNumber, 10);
+            if (Number.isNaN(itemNumber)) {
+              core.setFailed(`Invalid number input: ${rawNumber}`);
+              return;
+            }
+
+            const ownerLogin = '${{ inputs.project_owner }}';
+            const projectNumber = parseInt('${{ inputs.project_number }}', 10);
+            const inputStatus = '${{ inputs.status }}'.trim();
+
+            // Fetch issue (works for PRs too; detects via pull_request flag)
+            let issue;
+            try {
+              issue = (await github.rest.issues.get({ owner: context.repo.owner, repo: context.repo.repo, issue_number: itemNumber })).data;
+            } catch (e) {
+              core.setFailed(`Unable to fetch issue/PR #${itemNumber}: ${e.status || ''} ${e.message}`);
+              return;
+            }
+
+            const isPR = !!issue.pull_request;
+
+            // Derive desired status if not provided
+            let desiredStatus = inputStatus;
+            if (!desiredStatus) {
+              if (isPR) {
+                // Need PR details to detect merged state
+                let prData;
+                try {
+                  prData = (await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: itemNumber })).data;
+                } catch (e) {
+                  core.warning(`Unable to fetch PR details for #${itemNumber}: ${e.status || ''} ${e.message}`);
+                }
+                desiredStatus = prData?.merged ? 'Done' : 'In Progress';
+              } else {
+                desiredStatus = 'Planned';
+              }
+            }
+
+            // Resolve owner type (User vs Organization)
+            let ownerType = 'User';
+            try {
+              const { data: ownerInfo } = await github.rest.users.getByUsername({ username: ownerLogin });
+              ownerType = ownerInfo.type === 'Organization' ? 'Organization' : 'User';
+            } catch (e) {
+              core.warning(`Failed to resolve owner type for ${ownerLogin}, defaulting to User: ${e.status || ''} ${e.message}`);
+            }
+
+            // Query project and Status field
+            const projectQuery = ownerType === 'Organization'
+              ? `query($login: String!, $number: Int!) {\n  organization(login: $login) {\n    projectV2(number: $number) {\n      id\n      title\n      fields(first: 50) {\n        nodes {\n          ... on ProjectV2FieldCommon { id name }\n          ... on ProjectV2SingleSelectField { id name options { id name } }\n        }\n      }\n    }\n  }\n}`
+              : `query($login: String!, $number: Int!) {\n  user(login: $login) {\n    projectV2(number: $number) {\n      id\n      title\n      fields(first: 50) {\n        nodes {\n          ... on ProjectV2FieldCommon { id name }\n          ... on ProjectV2SingleSelectField { id name options { id name } }\n        }\n      }\n    }\n  }\n}`;
+
+            const projData = await github.graphql(projectQuery, { login: ownerLogin, number: projectNumber });
+            const project = ownerType === 'Organization' ? projData.organization?.projectV2 : projData.user?.projectV2;
+            if (!project?.id) {
+              core.setFailed(`Project not found for owner=${ownerLogin}, number=${projectNumber}`);
+              return;
+            }
+
+            // Find Status field + option
+            const fields = project.fields?.nodes || [];
+            const statusField = fields.find(f => f?.name?.toLowerCase() === 'status' && f.options);
+            let optionId = null;
+            if (statusField?.options?.length) {
+              const match = statusField.options.find(o => (o.name || '').toLowerCase() === desiredStatus.toLowerCase());
+              if (match) optionId = match.id;
+            }
+            if (!optionId) {
+              core.warning(`Status option '${desiredStatus}' not found on project. Will add item without setting Status.`);
+            }
+
+            // Add item to project
+            const contentId = issue.node_id; // works for both Issue and PR
+            const addRes = await github.graphql(
+              `mutation($projectId: ID!, $contentId: ID!) {\n  addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {\n    item { id }\n  }\n}`,
+              { projectId: project.id, contentId }
+            );
+            const itemId = addRes?.addProjectV2ItemById?.item?.id;
+            if (!itemId) {
+              core.setFailed('Failed to add item to project');
+              return;
+            }
+
+            // Update Status if option exists
+            if (optionId) {
+              await github.graphql(
+                `mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {\n  updateProjectV2ItemFieldValue(input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: { singleSelectOptionId: $optionId }}) {\n    projectV2Item { id }\n  }\n}`,
+                { projectId: project.id, itemId, fieldId: statusField.id, optionId }
+              );
+            }
+
+            core.notice(`Added #${itemNumber} (${isPR ? 'PR' : 'Issue'}) to project '${project.title}' with Status='${desiredStatus}'.`);
