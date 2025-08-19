@@ -18,14 +18,44 @@ export const SimpleRichEditor: React.FC<SimpleRichEditorProps> = ({
   const editorRef = useRef<HTMLDivElement>(null);
   const isUpdatingRef = useRef(false);
 
-  // Initialize content
+  // Initialize content with proper HTML sanitization
   useEffect(() => {
     if (editorRef.current && !isUpdatingRef.current) {
       if (value && value !== editorRef.current.innerHTML) {
-        editorRef.current.innerHTML = value;
+        // Sanitize HTML while preserving formatting
+        const sanitizedHTML = sanitizeHTML(value);
+        editorRef.current.innerHTML = sanitizedHTML;
       }
     }
   }, [value]);
+
+  // HTML sanitization that preserves formatting
+  const sanitizeHTML = (html: string): string => {
+    // Create a temporary div to work with the HTML
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+    
+    // Remove potentially dangerous elements but keep formatting
+    const forbiddenTags = ['script', 'style', 'object', 'embed', 'form', 'input', 'button'];
+    forbiddenTags.forEach(tag => {
+      const elements = tempDiv.querySelectorAll(tag);
+      elements.forEach(el => el.remove());
+    });
+    
+    // Clean up attributes but preserve essential formatting ones
+    const allowedAttributes = ['style', 'href', 'title', 'alt', 'src'];
+    const allElements = tempDiv.querySelectorAll('*');
+    allElements.forEach(element => {
+      const attrs = Array.from(element.attributes);
+      attrs.forEach(attr => {
+        if (!allowedAttributes.includes(attr.name.toLowerCase())) {
+          element.removeAttribute(attr.name);
+        }
+      });
+    });
+    
+    return tempDiv.innerHTML;
+  };
 
   // Handle content changes
   const handleInput = useCallback(() => {
@@ -163,10 +193,12 @@ export const SimpleRichEditor: React.FC<SimpleRichEditorProps> = ({
       <div
         ref={editorRef}
         contentEditable
-        className="min-h-[120px] max-h-[300px] overflow-y-auto p-3 text-slate-100 focus:outline-none overflow-x-hidden"
+        className="min-h-[120px] max-h-[300px] overflow-y-auto p-3 focus:outline-none overflow-x-hidden"
         style={{
           wordBreak: 'break-word',
-          whiteSpace: 'pre-wrap'
+          whiteSpace: 'pre-wrap',
+          color: '#f1f5f9 !important',
+          backgroundColor: 'transparent'
         }}
         onInput={handleInput}
         onKeyDown={handleKeyDown}
@@ -184,47 +216,67 @@ export const SimpleRichEditor: React.FC<SimpleRichEditorProps> = ({
             opacity: 0.6;
           }
           
-          /* Rich text styling */
-          [contenteditable] h1 {
-            font-size: 1.5rem;
-            font-weight: 700;
-            margin: 0.5rem 0;
-            color: #f1f5f9;
+          /* Global white text enforcement with maximum specificity */
+          div[contenteditable] {
+            color: #f1f5f9 !important;
           }
-          
-          [contenteditable] h2 {
-            font-size: 1.25rem;
-            font-weight: 600;
-            margin: 0.5rem 0;
-            color: #f1f5f9;
+          div[contenteditable] *,
+          div[contenteditable] *:before,
+          div[contenteditable] *:after {
+            color: #f1f5f9 !important;
+            background-color: transparent !important;
           }
-          
-          [contenteditable] h3 {
-            font-size: 1.125rem;
-            font-weight: 600;
-            margin: 0.5rem 0;
-            color: #f1f5f9;
+          div[contenteditable] h1, div[contenteditable] h2, div[contenteditable] h3, 
+          div[contenteditable] h4, div[contenteditable] h5, div[contenteditable] h6 {
+            color: #f1f5f9 !important;
+            font-weight: bold !important;
+            margin: 0.5em 0 !important;
           }
-          
-          [contenteditable] ul, [contenteditable] ol {
-            margin: 0.5rem 0;
-            padding-left: 1.5rem;
+          div[contenteditable] p {
+            color: #f1f5f9 !important;
+            margin: 0.25em 0 !important;
           }
-          
-          [contenteditable] li {
-            margin: 0.25rem 0;
+          div[contenteditable] ul, div[contenteditable] ol {
+            color: #f1f5f9 !important;
+            margin: 0.5em 0 !important;
+            padding-left: 1.5em !important;
           }
-          
-          [contenteditable] p {
-            margin: 0.5rem 0;
+          div[contenteditable] li {
+            color: #f1f5f9 !important;
+            margin: 0.1em 0 !important;
           }
-          
-          [contenteditable] strong {
-            font-weight: 700;
+          div[contenteditable] a {
+            color: #60a5fa !important;
+            text-decoration: underline !important;
           }
-          
-          [contenteditable] em {
-            font-style: italic;
+          div[contenteditable] a:hover {
+            color: #93c5fd !important;
+          }
+          div[contenteditable] strong, div[contenteditable] b {
+            color: #f1f5f9 !important;
+            font-weight: bold !important;
+          }
+          div[contenteditable] em, div[contenteditable] i {
+            color: #f1f5f9 !important;
+            font-style: italic !important;
+          }
+          div[contenteditable] u {
+            color: #f1f5f9 !important;
+            text-decoration: underline !important;
+          }
+          div[contenteditable] code {
+            color: #f1f5f9 !important;
+            background-color: #374151 !important;
+            padding: 0.2em 0.4em !important;
+            border-radius: 0.25rem !important;
+            font-family: monospace !important;
+          }
+          div[contenteditable] blockquote {
+            color: #f1f5f9 !important;
+            border-left: 4px solid #60a5fa !important;
+            padding-left: 1em !important;
+            margin: 0.5em 0 !important;
+            font-style: italic !important;
           }
         `
       }} />

@@ -619,11 +619,28 @@ const App: React.FC = () => {
   };
 
   // Handler for version change in carousel
-  const handleVersionChange = (snippetId: string, versionIndex: number) => {
+  const handleVersionChange = async (snippetId: string, versionIndex: number) => {
+    // Update local state for immediate UI feedback
     setCurrentViewingVersions(prev => ({
       ...prev,
       [snippetId]: versionIndex
     }));
+
+    // Persist the version selection to storage so hotkeys/context menu use this version
+    try {
+      const updatedSnippets = snippets.map(snippet => 
+        snippet.id === snippetId 
+          ? { ...snippet, currentVersionIndex: versionIndex }
+          : snippet
+      );
+      
+      await chrome.storage.local.set({ snippets: updatedSnippets });
+      setSnippets(updatedSnippets);
+      
+      console.log(`[Clippy] Persisted version ${versionIndex} selection for snippet ${snippetId}`);
+    } catch (error) {
+      console.error('[Clippy] Failed to persist version selection:', error);
+    }
   };
 
   // Handler to close the snippet modal
@@ -1049,6 +1066,8 @@ const App: React.FC = () => {
               onPinSnippet={handlePinSnippet}
               onDeleteSnippet={handleDeleteSnippet}
               getFolderById={getFolderById}
+              onVersionChange={handleVersionChange}
+              currentViewingIndex={currentViewingVersions[activeSnippet.id]}
               hotkeyMappings={hotkeyMappings}
               chromeHotkeys={chromeHotkeys}
             />
