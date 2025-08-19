@@ -11,11 +11,73 @@ function getSelectionHtml() {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0) return '';
   
-  const container = document.createElement('div');
-  for (let i = 0; i < selection.rangeCount; i++) {
-    container.appendChild(selection.getRangeAt(i).cloneContents());
+  // Advanced HTML capture that preserves formatting
+  try {
+    const range = selection.getRangeAt(0);
+    const fragment = range.cloneContents();
+    const container = document.createElement('div');
+    container.appendChild(fragment);
+    
+    // Preserve computed styles for elements
+    const preserveFormatting = (element: Element, originalElement: Element) => {
+      const computedStyle = window.getComputedStyle(originalElement);
+      const tagName = originalElement.tagName.toLowerCase();
+      
+      // Apply essential formatting styles
+      if (computedStyle.fontWeight === 'bold' || computedStyle.fontWeight === '700' || tagName === 'strong' || tagName === 'b') {
+        element.setAttribute('style', (element.getAttribute('style') || '') + 'font-weight: bold;');
+      }
+      
+      if (computedStyle.fontStyle === 'italic' || tagName === 'em' || tagName === 'i') {
+        element.setAttribute('style', (element.getAttribute('style') || '') + 'font-style: italic;');
+      }
+      
+      if (computedStyle.textDecoration?.includes('underline') || tagName === 'u') {
+        element.setAttribute('style', (element.getAttribute('style') || '') + 'text-decoration: underline;');
+      }
+      
+      // Preserve links
+      if (tagName === 'a' && originalElement.hasAttribute('href')) {
+        element.setAttribute('href', originalElement.getAttribute('href') || '');
+      }
+      
+      // Preserve colors if explicitly set
+      if (computedStyle.color && computedStyle.color !== 'rgb(0, 0, 0)') {
+        element.setAttribute('style', (element.getAttribute('style') || '') + `color: ${computedStyle.color};`);
+      }
+    };
+    
+    // Find original elements and preserve their formatting
+    const walker = document.createTreeWalker(
+      range.commonAncestorContainer,
+      NodeFilter.SHOW_ELEMENT,
+      {
+        acceptNode: (node) => range.intersectsNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+      }
+    );
+    
+    const clonedElements = container.querySelectorAll('*');
+    let originalIndex = 0;
+    let originalElement = walker.nextNode() as Element;
+    
+    clonedElements.forEach((clonedEl) => {
+      if (originalElement && originalElement.tagName === clonedEl.tagName) {
+        preserveFormatting(clonedEl, originalElement);
+        originalElement = walker.nextNode() as Element;
+      }
+    });
+    
+    return container.innerHTML;
+    
+  } catch (error) {
+    console.warn('[Clippy] Advanced HTML capture failed, falling back to basic:', error);
+    // Fallback to basic method
+    const container = document.createElement('div');
+    for (let i = 0; i < selection.rangeCount; i++) {
+      container.appendChild(selection.getRangeAt(i).cloneContents());
+    }
+    return container.innerHTML;
   }
-  return container.innerHTML;
 }
 
 // We can keep a listener here if we need direct communication from popup/background

@@ -848,11 +848,16 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
             opacity: 0.6;
           }
           
+          .rich-text-editor [contenteditable] * {
+            color: inherit !important;
+          }
+          
           .rich-text-editor [contenteditable] h1 {
             font-size: 1.5rem;
             font-weight: bold;
             margin: 0.5rem 0;
             line-height: 1.2;
+            color: #f1f5f9 !important;
           }
           
           .rich-text-editor [contenteditable] h2 {
@@ -860,6 +865,7 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
             font-weight: bold;
             margin: 0.4rem 0;
             line-height: 1.3;
+            color: #f1f5f9 !important;
           }
           
           .rich-text-editor [contenteditable] h3 {
@@ -867,6 +873,7 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
             font-weight: bold;
             margin: 0.3rem 0;
             line-height: 1.4;
+            color: #f1f5f9 !important;
           }
           
           .rich-text-editor [contenteditable] h4 {
@@ -874,27 +881,55 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
             font-weight: bold;
             margin: 0.25rem 0;
             line-height: 1.4;
+            color: #f1f5f9 !important;
           }
           
           .rich-text-editor [contenteditable] ul, .rich-text-editor [contenteditable] ol {
             margin: 0.5rem 0;
             padding-left: 1.5rem;
+            color: #f1f5f9 !important;
           }
           
           .rich-text-editor [contenteditable] li {
             margin: 0.25rem 0;
+            color: #f1f5f9 !important;
+          }
+          
+          .rich-text-editor [contenteditable] p {
+            margin: 0.5rem 0;
+            color: #f1f5f9 !important;
+          }
+          
+          .rich-text-editor [contenteditable] div {
+            color: #f1f5f9 !important;
+          }
+          
+          .rich-text-editor [contenteditable] span {
+            color: inherit !important;
           }
           
           .rich-text-editor [contenteditable] strong, .rich-text-editor [contenteditable] b {
             font-weight: bold;
+            color: inherit !important;
           }
           
           .rich-text-editor [contenteditable] em, .rich-text-editor [contenteditable] i {
             font-style: italic;
+            color: inherit !important;
           }
           
           .rich-text-editor [contenteditable] u {
             text-decoration: underline;
+            color: inherit !important;
+          }
+          
+          .rich-text-editor [contenteditable] a {
+            color: #60a5fa !important;
+            text-decoration: underline;
+          }
+          
+          .rich-text-editor [contenteditable] a:hover {
+            color: #93c5fd !important;
           }
         `
       }} />

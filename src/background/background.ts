@@ -144,7 +144,58 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
               
               const range = selection.getRangeAt(0);
               
-              // Method 1: Try to use the browser's built-in HTML serialization
+              // Method 1: Advanced HTML capture with style preservation
+              function tryAdvancedHTMLCapture(): string {
+                try {
+                  // Create a temporary div to hold the cloned content
+                  const tempDiv = document.createElement('div');
+                  const clonedContent = range.cloneContents();
+                  tempDiv.appendChild(clonedContent);
+                  
+                  // Process all elements to preserve their formatting
+                  const allElements = tempDiv.querySelectorAll('*');
+                  allElements.forEach(element => {
+                    // Find the original element in the document
+                    const originalElement = findOriginalElementByContent(element, range);
+                    if (originalElement) {
+                      const computedStyle = window.getComputedStyle(originalElement);
+                      preserveElementFormatting(element, computedStyle, originalElement);
+                    }
+                  });
+                  
+                  // Process text nodes that might need formatting
+                  const walker = document.createTreeWalker(
+                    tempDiv,
+                    NodeFilter.SHOW_TEXT,
+                    null
+                  );
+                  
+                  const textNodes: Text[] = [];
+                  let textNode = walker.nextNode() as Text;
+                  while (textNode) {
+                    if (textNode.textContent && textNode.textContent.trim()) {
+                      textNodes.push(textNode);
+                    }
+                    textNode = walker.nextNode() as Text;
+                  }
+                  
+                  // Wrap text nodes with proper formatting
+                  textNodes.forEach(textNode => {
+                    const originalTextNode = findOriginalTextInRange(textNode.textContent || '', range);
+                    if (originalTextNode && originalTextNode.parentElement) {
+                      const parentStyle = window.getComputedStyle(originalTextNode.parentElement);
+                      wrapTextNodeWithFormatting(textNode, parentStyle);
+                    }
+                  });
+                  
+                  return tempDiv.innerHTML;
+                } catch (error) {
+                  console.warn('Advanced HTML capture failed:', error);
+                  return '';
+                }
+              }
+              
+              // Method 2: Try to use the browser's built-in HTML serialization
               function tryNativeHTMLCapture(): string {
                 try {
                   // Create a temporary div to hold the cloned content
@@ -313,6 +364,135 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                 }
               }
               
+              // Helper to find original element by content
+              function findOriginalElementByContent(element: Element, range: Range): Element | null {
+                try {
+                  const tagName = element.tagName.toLowerCase();
+                  const textContent = element.textContent || '';
+                  
+                  // Search within the range for matching elements
+                  const walker = document.createTreeWalker(
+                    range.commonAncestorContainer,
+                    NodeFilter.SHOW_ELEMENT,
+                    {
+                      acceptNode: (node: Node) => {
+                        if (node.nodeType === Node.ELEMENT_NODE) {
+                          const elem = node as Element;
+                          return range.intersectsNode(elem) && 
+                                 elem.tagName.toLowerCase() === tagName &&
+                                 elem.textContent === textContent
+                            ? NodeFilter.FILTER_ACCEPT 
+                            : NodeFilter.FILTER_SKIP;
+                        }
+                        return NodeFilter.FILTER_SKIP;
+                      }
+                    }
+                  );
+                  
+                  return walker.nextNode() as Element;
+                } catch {
+                  return null;
+                }
+              }
+              
+              // Helper to preserve element formatting
+              function preserveElementFormatting(element: Element, computedStyle: CSSStyleDeclaration, originalElement: Element) {
+                const styles: string[] = [];
+                
+                // Preserve important formatting styles
+                const importantStyles = [
+                  'fontWeight', 'fontStyle', 'textDecoration', 'color', 
+                  'backgroundColor', 'fontSize', 'fontFamily'
+                ];
+                
+                importantStyles.forEach(styleProp => {
+                  const value = computedStyle.getPropertyValue(styleProp.replace(/([A-Z])/g, '-$1').toLowerCase());
+                  if (value && value !== 'initial' && value !== 'normal' && value !== 'none') {
+                    styles.push(`${styleProp.replace(/([A-Z])/g, '-$1').toLowerCase()}: ${value}`);
+                  }
+                });
+                
+                // Apply semantic tags for better compatibility
+                const fontWeight = computedStyle.fontWeight;
+                if (fontWeight === 'bold' || fontWeight === '700' || parseInt(fontWeight) >= 700) {
+                  if (element.tagName !== 'STRONG' && element.tagName !== 'B') {
+                    const strong = document.createElement('strong');
+                    while (element.firstChild) {
+                      strong.appendChild(element.firstChild);
+                    }
+                    element.appendChild(strong);
+                  }
+                }
+                
+                const fontStyle = computedStyle.fontStyle;
+                if (fontStyle === 'italic') {
+                  if (element.tagName !== 'EM' && element.tagName !== 'I') {
+                    const em = document.createElement('em');
+                    while (element.firstChild) {
+                      em.appendChild(element.firstChild);
+                    }
+                    element.appendChild(em);
+                  }
+                }
+                
+                // Apply styles
+                if (styles.length > 0) {
+                  const existingStyle = element.getAttribute('style') || '';
+                  const newStyle = existingStyle + (existingStyle ? '; ' : '') + styles.join('; ');
+                  element.setAttribute('style', newStyle);
+                }
+              }
+              
+              // Helper to find original text in range
+              function findOriginalTextInRange(text: string, range: Range): Text | null {
+                const walker = document.createTreeWalker(
+                  range.commonAncestorContainer,
+                  NodeFilter.SHOW_TEXT,
+                  {
+                    acceptNode: (node: Node) => {
+                      return range.intersectsNode(node) && node.textContent?.includes(text) 
+                        ? NodeFilter.FILTER_ACCEPT 
+                        : NodeFilter.FILTER_SKIP;
+                    }
+                  }
+                );
+                
+                return walker.nextNode() as Text;
+              }
+              
+              // Helper to wrap text node with formatting
+              function wrapTextNodeWithFormatting(textNode: Text, parentStyle: CSSStyleDeclaration) {
+                const wrapper = document.createElement('span');
+                const styles: string[] = [];
+                
+                // Check for formatting that should be preserved
+                const fontWeight = parentStyle.fontWeight;
+                if (fontWeight === 'bold' || fontWeight === '700' || parseInt(fontWeight) >= 700) {
+                  styles.push('font-weight: bold');
+                }
+                
+                const fontStyle = parentStyle.fontStyle;
+                if (fontStyle === 'italic') {
+                  styles.push('font-style: italic');
+                }
+                
+                const textDecoration = parentStyle.textDecoration;
+                if (textDecoration && textDecoration !== 'none') {
+                  styles.push(`text-decoration: ${textDecoration}`);
+                }
+                
+                const color = parentStyle.color;
+                if (color && color !== 'rgb(0, 0, 0)') {
+                  styles.push(`color: ${color}`);
+                }
+                
+                if (styles.length > 0) {
+                  wrapper.setAttribute('style', styles.join('; '));
+                  wrapper.textContent = textNode.textContent || '';
+                  textNode.parentNode?.replaceChild(wrapper, textNode);
+                }
+              }
+              
               // Helper to find original text node
               function findOriginalTextNode(text: string, range: Range): Text | null {
                 const walker = document.createTreeWalker(
@@ -330,8 +510,11 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
                 return walker.nextNode() as Text;
               }
               
-              // Try methods in order
-              let result = tryNativeHTMLCapture();
+              // Try methods in order of preference
+              let result = tryAdvancedHTMLCapture();
+              if (!result || result.trim() === '') {
+                result = tryNativeHTMLCapture();
+              }
               if (!result || result.trim() === '') {
                 result = tryAggressiveCapture();
               }
@@ -369,7 +552,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         if (selectionData) {
           console.log('[Clippy] Successfully captured selection data:', {
             plainText: selectionData.plainText?.substring(0, 100) + '...',
-            htmlLength: selectionData.html?.length || 0
+            htmlLength: selectionData.html?.length || 0,
+            htmlContent: selectionData.html // Show full HTML content for debugging
           });
           await chrome.storage.local.set({ 
             pendingSnippetText: selectionData.plainText,
@@ -415,6 +599,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       if (snippet && tab?.id) {
         console.log('[Clippy] Context menu paste - Executing script on tab:', tab.id);
         const version = getCurrentVersion(snippet);
+        console.log('[Clippy] Context menu paste - Using version:', { text: version.text?.substring(0, 50), htmlLength: version.html?.length || 0 });
         chrome.scripting.executeScript({
           target: { tabId: tab.id, allFrames: true },
           func: pasteContentInActiveElementWithDebug,
@@ -589,7 +774,7 @@ function pasteContentInActiveElementWithDebug(textToPaste: string, _htmlToPaste?
     return false;
   }
   
-  console.log('[Clippy] Frame selected target element:', {
+  console.log('[Clippy] Attempting to paste content into active element:', {
     tagName: activeElement.tagName,
     type: (activeElement as HTMLInputElement).type || 'n/a',
     id: activeElement.id || 'no-id',
@@ -597,9 +782,539 @@ function pasteContentInActiveElementWithDebug(textToPaste: string, _htmlToPaste?
     placeholder: (activeElement as HTMLInputElement).placeholder || 'no-placeholder',
     currentValue: (activeElement as HTMLInputElement).value?.substring(0, 50) + '...' || 'no-value',
     isVisible: activeElement.offsetWidth > 0 && activeElement.offsetHeight > 0,
-    isFocused: activeElement === document.activeElement
+    isFocused: activeElement === document.activeElement,
+    currentURL: window.location.href,
+    currentPath: window.location.pathname
   });
   
+  // SYSTEMATIC PASTE STRATEGY "BUCKETS" 
+  // Bucket 1: Gmail (uses execCommand with timeout + events)
+  // Bucket 2: LinkedIn Home Feed (uses Quill-optimized HTML cleanup)
+  // Bucket 3: LinkedIn Newsletter/Article (uses ProseMirror-optimized execCommand)
+  // Bucket 4: Generic contentEditable (uses direct HTML insertion)
+  // Bucket 5: Input/Textarea (uses value manipulation)
+
+  // Detect editor type based on DOM structure and attributes
+  function detectEditorType(element: HTMLElement): { 
+    isLinkedIn: boolean, 
+    isBlog: boolean, 
+    isNewsletter: boolean, 
+    isPost: boolean, 
+    isLinkedInHomePage: boolean,
+    isGmail: boolean, 
+    isGmailCompose: boolean 
+  } {
+    console.log('[Clippy] detectEditorType CALLED with element:', {
+      tagName: element.tagName,
+      id: element.id,
+      className: element.className?.substring(0, 100),
+      currentURL: window.location.href,
+      currentPath: window.location.pathname
+    });
+    
+    const result = { 
+      isLinkedIn: false, 
+      isBlog: false, 
+      isNewsletter: false, 
+      isPost: false, 
+      isLinkedInHomePage: false,
+      isGmail: false, 
+      isGmailCompose: false 
+    };
+    
+    // Check if we're on Gmail
+    if (window.location.href.includes('mail.google.com')) {
+      result.isGmail = true;
+      
+      // Check for Gmail compose editor
+      let current: Element | null = element;
+      while (current) {
+        const className = current.className || '';
+        const role = current.getAttribute('role') || '';
+        
+        if (className.includes('Am') || // Gmail compose area
+            role === 'textbox' ||
+            className.includes('editable') ||
+            current.hasAttribute('contenteditable') ||
+            className.includes('gmail_default')) {
+          result.isGmailCompose = true;
+          break;
+        }
+        current = current.parentElement;
+      }
+      
+      console.log('[Clippy] Gmail editor detection result:', result);
+      return result;
+    }
+    
+    // Check if we're on LinkedIn
+    if (window.location.href.includes('linkedin.com')) {
+      result.isLinkedIn = true;
+      console.log('[Clippy] On LinkedIn - URL:', window.location.href, 'Path:', window.location.pathname);
+      
+      // Force LinkedIn home page detection for LinkedIn feed URLs
+      const isLinkedInFeed = window.location.href.includes('linkedin.com/feed') || 
+                            window.location.pathname === '/feed/' || 
+                            window.location.pathname === '/' ||
+                            window.location.pathname.startsWith('/feed');
+      
+      if (isLinkedInFeed) {
+        result.isLinkedInHomePage = true;
+        result.isPost = true; // Force post type for LinkedIn feed
+        console.log('[Clippy] FORCED LinkedIn home page feed editor detection - Path:', window.location.pathname);
+        console.log('[Clippy] LinkedIn home page post editor FORCED for feed URL');
+        return result;
+      }
+      
+      // Original detection logic as fallback
+      if (window.location.pathname === '/feed/' || window.location.pathname === '/' || window.location.href.includes('linkedin.com/feed')) {
+        result.isLinkedInHomePage = true;
+        console.log('[Clippy] Detected LinkedIn home page feed editor - Path:', window.location.pathname);
+        
+        // Still check for post vs other editor types on home page
+        let current: Element | null = element;
+        while (current) {
+          const className = current.className || '';
+          const ariaLabel = current.getAttribute('aria-label') || '';
+          const placeholder = (current as HTMLElement).getAttribute('placeholder') || '';
+          
+          console.log('[Clippy] Checking element for post indicators:', {
+            tagName: current.tagName,
+            className: className.substring(0, 100),
+            ariaLabel,
+            placeholder
+          });
+          
+          // Home page post compose indicators
+          if (ariaLabel.toLowerCase().includes('share') || 
+              placeholder.toLowerCase().includes('share') ||
+              className.includes('share-box') ||
+              className.includes('compose') ||
+              current.getAttribute('data-test-id')?.includes('share')) {
+            result.isPost = true;
+            console.log('[Clippy] LinkedIn home page post editor confirmed via:', { ariaLabel, placeholder, className });
+            return result;
+          }
+          
+          current = current.parentElement;
+        }
+        
+        // Default to post for LinkedIn home page contentEditable
+        if (element.isContentEditable) {
+          result.isPost = true;
+          console.log('[Clippy] LinkedIn home page defaulting to post for contentEditable');
+        }
+        return result;
+      }
+      
+      // Check for LinkedIn blog/newsletter editor (other pages)
+      let current: Element | null = element;
+      while (current) {
+        const className = current.className || '';
+        const id = current.id || '';
+        
+        // Blog/newsletter indicators
+        if (className.includes('editor-content') || 
+            className.includes('ql-editor') || 
+            className.includes('prosemirror') ||
+            id.includes('editor') ||
+            current.getAttribute('data-editor') ||
+            current.querySelector('[data-editor]')) {
+          result.isBlog = true;
+          return result;
+        }
+        
+        // Newsletter specific indicators
+        if (className.includes('newsletter') || 
+            current.getAttribute('data-test-id')?.includes('newsletter')) {
+          result.isNewsletter = true;
+          return result;
+        }
+        
+        current = current.parentElement;
+      }
+      
+      // Default to post for other LinkedIn contentEditable elements
+      if (element.isContentEditable) {
+        result.isPost = true;
+      }
+    }
+    
+    console.log('[Clippy] LinkedIn editor detection result:', result);
+    return result;
+  }
+
+  // Clean HTML content for LinkedIn Quill editor compatibility
+  function cleanHtmlForLinkedInFeed(htmlContent: string): string {
+    try {
+      // Create temp element to parse HTML
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = htmlContent;
+      
+      // Extract clean text with minimal HTML structure for Quill
+      const extractCleanContent = (element: Element): string => {
+        let result = '';
+        
+        for (let child of Array.from(element.childNodes)) {
+          if (child.nodeType === Node.TEXT_NODE) {
+            const text = child.textContent?.trim();
+            if (text) {
+              result += text + ' ';
+            }
+          } else if (child.nodeType === Node.ELEMENT_NODE) {
+            const el = child as Element;
+            const tagName = el.tagName.toLowerCase();
+            const text = el.textContent?.trim();
+            
+            if (!text) continue; // Skip empty elements
+            
+            // Handle different element types with Quill-friendly markup
+            if (tagName === 'h1' || tagName === 'h2' || tagName === 'h3') {
+              result += `<p><strong>${text}</strong></p>`;
+            } else if (tagName === 'strong' || tagName === 'b') {
+              result += `<strong>${text}</strong> `;
+            } else if (tagName === 'em' || tagName === 'i') {
+              result += `<em>${text}</em> `;
+            } else if (tagName === 'a') {
+              const href = el.getAttribute('href');
+              if (href) {
+                result += `<a href="${href}">${text}</a> `;
+              } else {
+                result += text + ' ';
+              }
+            } else if (tagName === 'li') {
+              result += `<p>• ${text}</p>`;
+            } else if (tagName === 'p' || tagName === 'div') {
+              // Check if this paragraph contains bullet points
+              if (text.startsWith('•') || text.startsWith('-') || text.startsWith('*')) {
+                result += `<p>${text}</p>`;
+              } else {
+                const cleanText = extractCleanContent(el);
+                if (cleanText.trim()) {
+                  result += `<p>${cleanText.trim()}</p>`;
+                }
+              }
+            } else {
+              // Default: extract text content
+              const cleanText = extractCleanContent(el);
+              if (cleanText.trim()) {
+                result += cleanText + ' ';
+              }
+            }
+          }
+        }
+        
+        return result;
+      };
+      
+      let cleanedHtml = extractCleanContent(tempDiv);
+      
+      // Final cleanup for Quill editor
+      cleanedHtml = cleanedHtml
+        .replace(/\s+/g, ' ')  // Collapse multiple spaces
+        .replace(/>\s+</g, '><')  // Remove spaces between tags
+        .replace(/<\/p>\s*<p>/g, '</p><p>')  // Clean paragraph spacing
+        .replace(/(<p><\/p>)/g, '')  // Remove empty paragraphs
+        .replace(/\s+$/, '')  // Remove trailing spaces
+        .trim();
+      
+      // If result is too complex, fallback to simple text with paragraphs
+      if (cleanedHtml.length < 100 || cleanedHtml.split('<').length > 50) {
+        console.log('[Clippy] HTML too complex, using text fallback');
+        const plainText = tempDiv.textContent || '';
+        const paragraphs = plainText.split(/\n\s*\n/).filter(p => p.trim());
+        cleanedHtml = paragraphs.map(p => `<p>${p.trim()}</p>`).join('');
+      }
+      
+      console.log('[Clippy] Cleaned HTML for LinkedIn Quill editor:', {
+        originalLength: htmlContent.length,
+        cleanedLength: cleanedHtml.length,
+        preview: cleanedHtml.substring(0, 300)
+      });
+      
+      return cleanedHtml;
+    } catch (error) {
+      console.error('[Clippy] HTML cleaning failed:', error);
+      return htmlContent; // Return original if cleaning fails
+    }
+  }
+
+  // LinkedIn home page specific paste handling
+  function tryLinkedInHomePagePaste(element: HTMLElement, htmlToPaste: string, textToPaste: string): boolean {
+    try {
+      console.log('[Clippy] Attempting LinkedIn home page specific paste');
+      
+      // Clean HTML for LinkedIn feed compatibility
+      const cleanedHtml = cleanHtmlForLinkedInFeed(htmlToPaste);
+      
+      // Focus the element first
+      element.focus();
+      
+      // LinkedIn home page often needs a click event to activate the editor
+      element.click();
+      
+      // Wait a moment for LinkedIn to activate the editor
+      setTimeout(() => {
+        // Try direct HTML insertion with cleaned content
+        if (cleanedHtml && cleanedHtml.trim()) {
+          try {
+            // Clear existing content
+            element.innerHTML = '';
+            
+            // Insert cleaned HTML content
+            element.innerHTML = cleanedHtml;
+            
+            // Trigger events to notify LinkedIn
+            const inputEvent = new Event('input', { bubbles: true });
+            const changeEvent = new Event('change', { bubbles: true });
+            element.dispatchEvent(inputEvent);
+            element.dispatchEvent(changeEvent);
+            
+            console.log('[Clippy] LinkedIn home page HTML insertion completed with cleaned content');
+            return true;
+          } catch (htmlError) {
+            console.warn('[Clippy] LinkedIn home page HTML insertion failed:', htmlError);
+          }
+        }
+        
+        // Fallback to text insertion
+        try {
+          element.textContent = textToPaste;
+          const inputEvent = new Event('input', { bubbles: true });
+          element.dispatchEvent(inputEvent);
+          console.log('[Clippy] LinkedIn home page text insertion completed');
+          return true;
+        } catch (textError) {
+          console.error('[Clippy] LinkedIn home page text insertion failed:', textError);
+          return false;
+        }
+      }, 100);
+      
+      return true; // Assume success since we're using setTimeout
+    } catch (error) {
+      console.error('[Clippy] LinkedIn home page paste error:', error);
+      return false;
+    }
+  }
+
+  // Direct HTML insertion for rich text editors that don't accept clipboard events
+  function tryDirectHtmlInsertion(element: HTMLElement, htmlToPaste: string, textToPaste: string): boolean {
+    try {
+      console.log('[Clippy] Attempting direct HTML insertion with content:', htmlToPaste.substring(0, 200));
+      
+      // Enhanced Gmail-specific handling
+      if (window.location.href.includes('mail.google.com')) {
+        console.log('[Clippy] Using Gmail-specific HTML insertion');
+        return tryGmailHtmlInsertion(element, htmlToPaste, textToPaste);
+      }
+      
+      // LinkedIn home page specific paste handling
+      if (window.location.href.includes('linkedin.com') && (window.location.pathname === '/feed/' || window.location.pathname === '/' || window.location.href.includes('linkedin.com/feed'))) {
+        return tryLinkedInHomePagePaste(element, htmlToPaste, textToPaste);
+      }
+      
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        
+        // Create a temporary container to parse HTML
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = htmlToPaste;
+        
+        // Convert HTML to document fragment
+        const fragment = document.createDocumentFragment();
+        while (tempDiv.firstChild) {
+          fragment.appendChild(tempDiv.firstChild);
+        }
+        
+        // Insert the HTML fragment
+        range.insertNode(fragment);
+        range.collapse(false);
+        
+        // Trigger input events to notify the editor
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+        
+        console.log('[Clippy] Direct HTML insertion completed');
+        return true;
+      }
+      
+      // Fallback: replace entire content
+      element.innerHTML = htmlToPaste;
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      console.log('[Clippy] Replaced entire content with HTML');
+      return true;
+      
+    } catch (error) {
+      console.error('[Clippy] Direct HTML insertion failed:', error);
+      return false;
+    }
+  }
+
+  // LinkedIn newsletter/blog specific paste handling for ProseMirror editor
+  function tryLinkedInNewsletterPaste(element: HTMLElement, htmlToPaste: string, textToPaste: string): boolean {
+    try {
+      console.log('[Clippy] Attempting LinkedIn newsletter/blog specific paste');
+      
+      // Focus the element first
+      element.focus();
+      
+      // LinkedIn ProseMirror editor needs careful handling
+      setTimeout(() => {
+        try {
+          // Try execCommand first (ProseMirror supports this for formatting)
+          const selection = window.getSelection();
+          if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            
+            // For LinkedIn ProseMirror, try execCommand with HTML first
+            const success = document.execCommand('insertHTML', false, htmlToPaste);
+            if (success) {
+              console.log('[Clippy] LinkedIn newsletter HTML insertion via execCommand successful');
+              
+              // Trigger ProseMirror change detection
+              element.dispatchEvent(new Event('input', { bubbles: true }));
+              element.dispatchEvent(new Event('change', { bubbles: true }));
+              element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+              
+              return true;
+            }
+          }
+        } catch (execError) {
+          console.warn('[Clippy] LinkedIn newsletter execCommand failed, trying DOM insertion:', execError);
+          
+          // Fallback to direct DOM manipulation for ProseMirror
+          const selection = window.getSelection();
+          if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            
+            // Create document fragment from HTML
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = htmlToPaste;
+            
+            const fragment = document.createDocumentFragment();
+            while (tempDiv.firstChild) {
+              fragment.appendChild(tempDiv.firstChild);
+            }
+            
+            range.insertNode(fragment);
+            range.collapse(false);
+            
+            // Trigger ProseMirror's change events
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+            element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+            
+            console.log('[Clippy] LinkedIn newsletter DOM insertion completed');
+            return true;
+          }
+        }
+      }, 50);
+      
+      return true;
+      
+    } catch (error) {
+      console.error('[Clippy] LinkedIn newsletter HTML insertion failed:', error);
+      return false;
+    }
+  }
+
+  // Gmail-specific HTML insertion that works with their rich text editor
+  function tryGmailHtmlInsertion(element: HTMLElement, htmlToPaste: string, textToPaste: string): boolean {
+    try {
+      // Focus the element first
+      element.focus();
+      
+      // Gmail's rich text editor sometimes needs a slight delay
+      setTimeout(() => {
+        try {
+          // Try execCommand first (Gmail supports this for formatting)
+          const selection = window.getSelection();
+          if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            
+            // For Gmail, try to use execCommand with HTML
+            document.execCommand('insertHTML', false, htmlToPaste);
+            console.log('[Clippy] Gmail HTML insertion via execCommand successful');
+            
+            // Trigger Gmail's change detection
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+            
+            return true;
+          }
+        } catch (execError) {
+          console.warn('[Clippy] execCommand failed, trying direct DOM insertion:', execError);
+          
+          // Fallback to direct DOM manipulation
+          const selection = window.getSelection();
+          if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            
+            // Create document fragment from HTML
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = htmlToPaste;
+            
+            const fragment = document.createDocumentFragment();
+            while (tempDiv.firstChild) {
+              fragment.appendChild(tempDiv.firstChild);
+            }
+            
+            range.insertNode(fragment);
+            range.collapse(false);
+            
+            // Trigger Gmail's change events
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+            
+            console.log('[Clippy] Gmail direct DOM insertion completed');
+            return true;
+          }
+        }
+      }, 50);
+      
+      return true;
+      
+    } catch (error) {
+      console.error('[Clippy] Gmail HTML insertion failed:', error);
+      return false;
+    }
+  }
+
+  // Clipboard API paste method for HTML content
+  function tryClipboardApiPaste(element: HTMLElement, textToPaste: string, htmlToPaste: string): boolean {
+    try {
+      // Create clipboard data with both HTML and text
+      const clipboardData = new DataTransfer();
+      clipboardData.items.add(htmlToPaste, 'text/html');
+      clipboardData.items.add(textToPaste, 'text/plain');
+      
+      // Create and dispatch paste event
+      const pasteEvent = new ClipboardEvent('paste', {
+        clipboardData: clipboardData,
+        bubbles: true,
+        cancelable: true
+      });
+      
+      // Focus element and dispatch event
+      element.focus();
+      const success = element.dispatchEvent(pasteEvent);
+      
+      console.log('[Clippy] Clipboard API paste dispatched:', success);
+      return success;
+      
+    } catch (error) {
+      console.warn('[Clippy] Clipboard API paste failed:', error);
+      return false;
+    }
+  }
+
   // Enhanced ultra simple method with proper cursor positioning
   function trySmartPaste(): boolean {
     if (!activeElement) return false;
@@ -637,6 +1352,44 @@ function pasteContentInActiveElementWithDebug(textToPaste: string, _htmlToPaste?
       if (activeElement.isContentEditable || activeElement.getAttribute('contenteditable') === 'true') {
         activeElement.focus();
         
+        // Detect editor type (LinkedIn, Gmail, etc.)
+        const editorType = detectEditorType(activeElement);
+        console.log('[Clippy] Detected editor type:', editorType);
+
+        // Try different paste strategies based on editor type
+        if (editorType.isGmail && editorType.isGmailCompose) {
+          console.log('[Clippy] Using Gmail-specific paste strategy');
+          if (_htmlToPaste && _htmlToPaste.trim()) {
+            const success = tryGmailHtmlInsertion(activeElement, _htmlToPaste, textToPaste);
+            if (success) return true;
+          }
+        } else if (editorType.isLinkedIn && editorType.isLinkedInHomePage && editorType.isPost) {
+          console.log('[Clippy] Using LinkedIn home page specific paste strategy');
+          if (_htmlToPaste && _htmlToPaste.trim()) {
+            const success = tryLinkedInHomePagePaste(activeElement, _htmlToPaste, textToPaste);
+            if (success) return true;
+          }
+          // Fallback to text for LinkedIn home page
+          activeElement.textContent = textToPaste;
+          const inputEvent = new Event('input', { bubbles: true });
+          activeElement.dispatchEvent(inputEvent);
+          console.log('[Clippy] LinkedIn home page text fallback completed');
+          return true;
+        } else if (editorType.isLinkedIn && (editorType.isBlog || editorType.isNewsletter)) {
+          console.log('[Clippy] Using LinkedIn blog/newsletter paste strategy');
+          if (_htmlToPaste && _htmlToPaste.trim()) {
+            const success = tryLinkedInNewsletterPaste(activeElement, _htmlToPaste, textToPaste);
+            if (success) return true;
+          }
+        } else if (editorType.isLinkedIn && editorType.isPost && !editorType.isLinkedInHomePage) {
+          console.log('[Clippy] Using LinkedIn post paste strategy (non-home page)');
+          // Try clipboard API first for LinkedIn posts
+          if (_htmlToPaste && _htmlToPaste.trim()) {
+            const success = tryClipboardApiPaste(activeElement, textToPaste, _htmlToPaste);
+            if (success) return true;
+          }
+        }
+
         const selection = window.getSelection();
         if (selection && selection.rangeCount > 0) {
           const range = selection.getRangeAt(0);
@@ -1383,6 +2136,7 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     return true; // async response
   } else if (request.type === 'PASTE_SNIPPET') {
     // Accept paste requests from content/overlay context
+    console.log('[Clippy] Received PASTE_SNIPPET message from modal:', request.snippet?.title || request.snippet?.text?.substring(0, 50));
     handlePasteRequest(request.snippet);
   } else if (request.type === 'PASTE_SNIPPET_BY_ID') {
     const { snippetId } = request;
@@ -1742,6 +2496,15 @@ function executeToggleOverlay(originX?: number | null, originY?: number | null, 
       return;
     }
 
+    // CRITICAL: Store the currently focused element before opening modal
+    const originalFocusedElement = document.activeElement as HTMLElement;
+    console.log('[Clippy] Storing original focused element:', {
+      tagName: originalFocusedElement?.tagName,
+      id: originalFocusedElement?.id,
+      className: originalFocusedElement?.className,
+      placeholder: (originalFocusedElement as any)?.placeholder
+    });
+
     // Create dark modal overlay
     const overlay = document.createElement('div');
     overlay.id = CONTAINER_ID;
@@ -1800,6 +2563,11 @@ function executeToggleOverlay(originX?: number | null, originY?: number | null, 
     const resultsDiv = modal.querySelector('#clippy-results');
 
     const closeOverlay = () => {
+      console.log('[Clippy] Closing overlay, original focused element:', {
+        tagName: originalFocusedElement?.tagName,
+        id: originalFocusedElement?.id,
+        exists: !!originalFocusedElement
+      });
       overlay.remove();
     };
 
@@ -1867,11 +2635,79 @@ function executeToggleOverlay(originX?: number | null, originY?: number | null, 
         // Add click handlers
         if (resultsDiv) resultsDiv.querySelectorAll('.clippy-result').forEach((el, index) => {
           el.addEventListener('click', () => {
+            console.log('[Clippy] Snippet clicked, restoring focus to original element');
             closeOverlay();
-            // Send message to paste snippet
-            if (typeof chrome !== 'undefined' && chrome.runtime) {
-              chrome.runtime.sendMessage({ type: 'PASTE_SNIPPET', snippet: snippetsToRender[index] });
-            }
+            
+            // CRITICAL: Restore focus to original element before pasting
+            setTimeout(() => {
+              console.log('[Clippy] About to restore focus, original element details:', {
+                element: originalFocusedElement,
+                tagName: originalFocusedElement?.tagName,
+                id: originalFocusedElement?.id,
+                className: originalFocusedElement?.className,
+                isConnected: originalFocusedElement?.isConnected,
+                hasFocus: originalFocusedElement === document.activeElement,
+                canFocus: typeof originalFocusedElement?.focus === 'function'
+              });
+              
+              if (originalFocusedElement && originalFocusedElement.focus && originalFocusedElement.isConnected) {
+                try {
+                  originalFocusedElement.focus();
+                  console.log('[Clippy] Focus restored successfully to:', {
+                    tagName: originalFocusedElement.tagName,
+                    id: originalFocusedElement.id,
+                    nowActive: originalFocusedElement === document.activeElement
+                  });
+                  
+                  // Position cursor at end for text inputs
+                  if (originalFocusedElement instanceof HTMLInputElement || originalFocusedElement instanceof HTMLTextAreaElement) {
+                    const length = originalFocusedElement.value.length;
+                    originalFocusedElement.setSelectionRange(length, length);
+                    console.log('[Clippy] Cursor positioned at end for input element');
+                  }
+                  
+                  // For contentEditable elements, try to set cursor at end
+                  if (originalFocusedElement.isContentEditable) {
+                    const selection = window.getSelection();
+                    const range = document.createRange();
+                    range.selectNodeContents(originalFocusedElement);
+                    range.collapse(false);
+                    selection?.removeAllRanges();
+                    selection?.addRange(range);
+                    console.log('[Clippy] Cursor positioned at end for contentEditable element');
+                  }
+                  
+                } catch (focusError) {
+                  console.error('[Clippy] Error during focus restoration:', focusError);
+                }
+                
+                // Send message to paste snippet after focus is restored
+                setTimeout(() => {
+                  console.log('[Clippy] Sending PASTE_SNIPPET message for:', snippetsToRender[index]?.title || 'untitled snippet');
+                  if (typeof chrome !== 'undefined' && chrome.runtime) {
+                    chrome.runtime.sendMessage({ 
+                      type: 'PASTE_SNIPPET', 
+                      snippet: snippetsToRender[index],
+                      source: 'modal'
+                    });
+                  }
+                }, 100);
+              } else {
+                console.warn('[Clippy] Could not restore focus - element invalid:', {
+                  exists: !!originalFocusedElement,
+                  isConnected: originalFocusedElement?.isConnected,
+                  canFocus: typeof originalFocusedElement?.focus === 'function'
+                });
+                // Still try to paste without focus restoration
+                if (typeof chrome !== 'undefined' && chrome.runtime) {
+                  chrome.runtime.sendMessage({ 
+                    type: 'PASTE_SNIPPET', 
+                    snippet: snippetsToRender[index],
+                    source: 'modal-no-focus'
+                  });
+                }
+              }
+            }, 50);
           });
         });
       }

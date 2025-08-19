@@ -12,6 +12,7 @@ import { HamburgerMenu } from '@/components/ui/hamburger-menu';
 import { cn } from '@/lib/utils';
 import { formatDateToMD, formatCount } from '@/utils/format';
 import type { Snippet } from '@/utils/types';
+import { getAllVersions } from '@/utils/snippet-helpers';
 
 interface SnippetItemProps {
   snippet: Snippet;
@@ -43,6 +44,10 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
   // Find which hotkey (if any) is assigned to this snippet
   const assignedHotkey = hotkeyMappings.find(mapping => mapping.snippetId === snippet.id);
   const hotkeyShortcut = assignedHotkey && chromeHotkeys[assignedHotkey.slot] ? chromeHotkeys[assignedHotkey.slot] : null;
+  // Determine the currently selected version for this item (fallbacks: snippet.currentVersionIndex -> 0)
+  const viewingIndex = (currentViewingIndex ?? (snippet.currentVersionIndex ?? 0));
+  const versions = getAllVersions(snippet);
+  const selectedVersion = versions[viewingIndex] ?? versions[snippet.currentVersionIndex ?? 0] ?? versions[0];
   return (
     <motion.div
       layout
@@ -74,7 +79,7 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
               variant="ghost"
               size="icon"
               className="h-7 w-7 text-slate-400 hover:text-green-400"
-              onClick={() => onCopyToClipboard(snippet.text, snippet.id, snippet.html)}
+              onClick={() => onCopyToClipboard(selectedVersion.text, snippet.id, selectedVersion.html)}
               aria-label="Copy snippet"
             >
               {copiedSnippetId === snippet.id ? (
@@ -117,7 +122,7 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
         {snippet.lastUsed && (
           <Badge size="small" variant="outline" aria-label="Last used date" className="flex items-center gap-1">
             <Clock size={10} />
-            <span className="text-foreground font-medium">Last&nbsp;Used</span>
+            <span className="text-foreground font-medium">Last\u00A0Used</span>
             <span className="w-px h-2 bg-slate-500/60 self-center mx-1" />
             <span className="text-slate-400">{formatDateToMD(snippet.lastUsed)}</span>
           </Badge>
