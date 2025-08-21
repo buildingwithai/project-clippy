@@ -7,6 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SimpleRichEditor } from '@/components/ui/simple-rich-editor';
+import { TipTapEditor } from '@/components/ui/tiptap-editor';
+import type { ClippyContent } from '../../utils/types';
 
 import type { Snippet, Folder } from '../../utils/types';
 import { extractDomain } from '../../utils/url-helpers';
@@ -44,9 +46,11 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
   const [title, setTitle] = useState('');
   const [text, setText] = useState('');
   const [html, setHtml] = useState<string | undefined>(undefined);
+  const [clippyContent, setClippyContent] = useState<ClippyContent | undefined>(undefined);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [sourceUrl, setSourceUrl] = useState('');
   const [useSimpleEditor, setUseSimpleEditor] = useState(false);
+  const [useTipTap, setUseTipTap] = useState(true); // New: prefer TipTap by default
   const [isCreatingNewVersion, setIsCreatingNewVersion] = useState(false);
   const [versionMode, setVersionMode] = useState<'edit' | 'create'>('edit');
   const [savedContent, setSavedContent] = useState<{ text: string; html?: string; title: string }>({ text: '', html: undefined, title: '' });
@@ -114,6 +118,13 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
   const handleEditorChange = (content: { html: string; text: string }) => {
     setText(content.text);
     setHtml(content.html);
+  };
+
+  // Handle TipTap editor content change
+  const handleTipTapChange = (content: { clippyContent: ClippyContent; html: string; text: string }) => {
+    setText(content.text);
+    setHtml(content.html);
+    setClippyContent(content.clippyContent);
   };
 
   // Handle version mode toggle - use useCallback to ensure fresh closure values
@@ -303,13 +314,25 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="text-xs text-slate-400">💡 Use '/' for formatting</div>
-              <button
-                type="button"
-                onClick={() => setUseSimpleEditor(!useSimpleEditor)}
-                className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
-              >
-                {useSimpleEditor ? 'Rich' : 'Plain'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (useTipTap) {
+                      setUseTipTap(false);
+                      setUseSimpleEditor(false);
+                    } else if (!useSimpleEditor) {
+                      setUseSimpleEditor(true);
+                    } else {
+                      setUseTipTap(true);
+                      setUseSimpleEditor(false);
+                    }
+                  }}
+                  className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                >
+                  {useTipTap ? 'TipTap' : useSimpleEditor ? 'Plain' : 'Rich'}
+                </button>
+              </div>
             </div>
 
             {useSimpleEditor ? (
@@ -319,9 +342,18 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
                 onChange={(e) => {
                   setText(e.target.value);
                   setHtml(undefined);
+                  setClippyContent(undefined);
                 }}
                 placeholder="Enter your snippet content..."
                 className="w-full h-32 p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-100 placeholder-slate-500 text-sm focus:ring-1 focus:ring-sky-500 focus:border-sky-500/50 resize-none"
+              />
+            ) : useTipTap ? (
+              <TipTapEditor
+                key={`tiptap-${versionMode}`}
+                value={clippyContent || html || (text ? `<p>${text.replace(/\n/g, '</p><p>')}</p>` : '')}
+                onChange={handleTipTapChange}
+                placeholder="Enter your snippet content... Use toolbar for formatting."
+                className="h-32"
               />
             ) : (
               <SimpleRichEditor

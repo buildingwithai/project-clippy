@@ -29,7 +29,8 @@
     "src/overlay",
     "src/options",
     "src/components",
-    "src/hooks"
+    "src/hooks",
+    "src/utils"
   ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

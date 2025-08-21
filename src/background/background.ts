@@ -8,6 +8,34 @@ import { runMigrations } from './migration';
 import { getCurrentVersion } from '@/utils/snippet-helpers';
 
 import { parseVariables, resolveVariables } from '@/utils/variables';
+import { ClippyProcessor, getBestPasteContent } from '@/utils/clippy-integration';
+
+// Platform detection from URL (for background script)
+function detectPlatformFromURL(url: string): string {
+  const hostname = new URL(url).hostname.toLowerCase();
+  const pathname = new URL(url).pathname.toLowerCase();
+  
+  if (hostname.includes('linkedin.com')) {
+    if (pathname.includes('/article/edit') || pathname.includes('/newsletter/edit')) {
+      return 'linkedin-article';
+    }
+    return 'linkedin-quill';
+  }
+  
+  if (hostname.includes('mail.google.com') || hostname.includes('gmail.com')) {
+    return 'gmail';
+  }
+  
+  if (hostname.includes('discord.com')) {
+    return 'discord';
+  }
+  
+  if (hostname.includes('slack.com')) {
+    return 'slack';
+  }
+  
+  return 'contenteditable-generic';
+}
 
 const PACK_REGISTRY_URL = 'https://buildingwithai.github.io/project-clippy/packs/index.json';
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
@@ -676,6 +704,282 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 // Enhanced version with smart element detection and detailed debugging
+// Enhanced ClippyContent-aware pasting function with ProseMirror support
+function pasteContentWithClippyContent(content: string) {
+  console.log('[Clippy] Enhanced ClippyContent paste starting...', content.substring(0, 100));
+  
+  // Import platform detection utilities (injected into page context)
+  const detectPlatform = () => {
+    const domain = window.location.hostname.toLowerCase();
+    const activeElement = document.activeElement;
+    const path = window.location.pathname.toLowerCase();
+    
+    console.log('[Clippy] Platform detection - domain:', domain, 'path:', path, 'activeElement:', activeElement);
+    
+    // LinkedIn detection - prioritize article editor
+    if (domain.includes('linkedin.com') && activeElement) {
+      if (path.includes('/article/edit') || path.includes('/newsletter/edit')) {
+        if (activeElement.classList.contains('ProseMirror')) {
+          return { platformId: 'linkedin-article', editorType: 'prosemirror' };
+        }
+      }
+      
+      if (activeElement.classList.contains('ql-editor') || 
+          activeElement.closest('.ql-container')) {
+        return { platformId: 'linkedin-quill', editorType: 'quill' };
+      }
+    }
+    
+    // Gmail detection
+    if ((domain.includes('mail.google.com') || domain.includes('gmail.com')) && activeElement) {
+      if (activeElement.getAttribute('contenteditable') === 'true' && 
+          activeElement.getAttribute('role') === 'textbox') {
+        return { platformId: 'gmail', editorType: 'contenteditable' };
+      }
+    }
+    
+    // Discord detection
+    if (domain.includes('discord.com') && activeElement) {
+      if (activeElement.hasAttribute('data-slate-editor') || 
+          activeElement.closest('[data-slate-editor]')) {
+        return { platformId: 'discord', editorType: 'contenteditable' };
+      }
+    }
+    
+    // Generic detection
+    if (activeElement) {
+      if (activeElement.tagName.toLowerCase() === 'textarea') {
+        return { platformId: 'textarea', editorType: 'textarea' };
+      }
+      if (activeElement.getAttribute('contenteditable') === 'true') {
+        return { platformId: 'contenteditable-generic', editorType: 'contenteditable' };
+      }
+    }
+    
+    return { platformId: 'unknown', editorType: 'unknown' };
+  };
+  
+  // Find the best target element (reuse logic from original function)
+  const findBestTarget = () => {
+    const candidates: HTMLElement[] = [];
+    
+    if (document.activeElement && document.activeElement !== document.body) {
+      candidates.push(document.activeElement as HTMLElement);
+    }
+    
+    const editableElements = document.querySelectorAll(`
+      input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([disabled]), 
+      textarea:not([disabled]), 
+      [contenteditable="true"], 
+      [role="textbox"]
+    `);
+    
+    editableElements.forEach(el => {
+      const htmlEl = el as HTMLElement;
+      const rect = htmlEl.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        candidates.push(htmlEl);
+      }
+    });
+    
+    let bestScore = -1;
+    let bestElement: HTMLElement | null = null;
+    
+    for (const element of candidates) {
+      let score = 0;
+      if (element === document.activeElement) score += 1000;
+      if (element instanceof HTMLTextAreaElement) score += 30;
+      if (element instanceof HTMLInputElement && element.type === 'text') score += 25;
+      if (element.isContentEditable) score += 20;
+      
+      if (score > bestScore) {
+        bestScore = score;
+        bestElement = element;
+      }
+    }
+    
+    return bestElement;
+  };
+  
+  const targetElement = findBestTarget();
+  if (!targetElement) {
+    console.log('[Clippy] No suitable target element found');
+    return false;
+  }
+  
+  const platform = detectPlatform();
+  console.log('[Clippy] Detected platform:', platform);
+  
+  try {
+    // For ProseMirror editors (LinkedIn Articles), use structured content insertion
+    if (platform.editorType === 'prosemirror' && targetElement.classList.contains('ProseMirror')) {
+      console.log('[Clippy] Attempting ProseMirror paste...');
+      
+      try {
+        targetElement.focus();
+        
+        // Parse content to handle line breaks and structure
+        const lines = content.split('\n').filter(line => line.trim() !== '');
+        let htmlContent = '';
+        
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          
+          // Handle bullet points
+          if (trimmedLine.startsWith('• ') || trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ')) {
+            const listText = trimmedLine.substring(2).trim();
+            htmlContent += `<li>${listText}</li>`;
+          }
+          // Handle numbered lists
+          else if (/^\d+\./.test(trimmedLine)) {
+            const listText = trimmedLine.replace(/^\d+\.\s*/, '').trim();
+            htmlContent += `<li>${listText}</li>`;
+          }
+          // Handle headers (lines that end with colon or are all caps)
+          else if (trimmedLine.endsWith(':') || (trimmedLine === trimmedLine.toUpperCase() && trimmedLine.length > 3)) {
+            htmlContent += `<h3>${trimmedLine}</h3>`;
+          }
+          // Regular paragraphs
+          else {
+            htmlContent += `<p>${trimmedLine}</p>`;
+          }
+        }
+        
+        console.log('[Clippy] Generated HTML for ProseMirror:', htmlContent.substring(0, 200));
+        
+        // Try to use ProseMirror's transaction system if available
+        const prosemirrorView = (targetElement as any).pmview || (window as any).prosemirrorView;
+        
+        if (prosemirrorView && prosemirrorView.dispatch) {
+          console.log('[Clippy] Using ProseMirror transaction API');
+          
+          // Create a simple text insertion transaction
+          const { state } = prosemirrorView;
+          const { selection } = state;
+          const tr = state.tr.insertText(content, selection.from, selection.to);
+          prosemirrorView.dispatch(tr);
+          return true;
+        }
+        
+        // Fallback: Use clipboard paste simulation
+        const dataTransfer = new DataTransfer();
+        dataTransfer.setData('text/html', htmlContent);
+        dataTransfer.setData('text/plain', content);
+        
+        const pasteEvent = new ClipboardEvent('paste', {
+          clipboardData: dataTransfer,
+          bubbles: true,
+          cancelable: true
+        });
+        
+        if (targetElement.dispatchEvent(pasteEvent)) {
+          console.log('[Clippy] Successfully pasted via clipboard event to ProseMirror');
+          return true;
+        }
+        
+        // Final fallback: Use document.execCommand
+        if (document.execCommand('insertHTML', false, htmlContent)) {
+          console.log('[Clippy] Successfully pasted via execCommand to ProseMirror');
+          return true;
+        }
+        
+      } catch (prosemirrorError) {
+        console.log('[Clippy] ProseMirror paste failed, falling through:', prosemirrorError);
+      }
+    }
+    
+    // For Quill editors (LinkedIn), try to use Delta format if available
+    if (platform.editorType === 'quill' && targetElement.closest('.ql-container')) {
+      console.log('[Clippy] Attempting Quill paste...');
+      
+      // Try to access Quill instance
+      const quillContainer = targetElement.closest('.ql-container') as any;
+      const quill = quillContainer?.__quill || (window as any).Quill?.find?.(quillContainer);
+      
+      if (quill && quill.insertText) {
+        try {
+          // For now, just insert as text. In the future, we could parse Delta format from content
+          const currentLength = quill.getLength();
+          quill.insertText(currentLength - 1, content);
+          quill.setSelection(currentLength - 1 + content.length);
+          console.log('[Clippy] Successfully pasted via Quill API');
+          return true;
+        } catch (quillError) {
+          console.log('[Clippy] Quill API failed, falling through to standard paste:', quillError);
+        }
+      }
+    }
+    
+    // For contenteditable elements, try rich paste
+    if (platform.editorType === 'contenteditable') {
+      console.log('[Clippy] Attempting contenteditable paste...');
+      
+      targetElement.focus();
+      
+      // Clear selection and insert content
+      const selection = window.getSelection();
+      if (selection) {
+        selection.removeAllRanges();
+        
+        const range = document.createRange();
+        if (targetElement.childNodes.length > 0) {
+          range.setStart(targetElement, targetElement.childNodes.length);
+        } else {
+          range.setStart(targetElement, 0);
+        }
+        range.collapse(true);
+        selection.addRange(range);
+        
+        // Try execCommand first (works in most cases)
+        if (document.execCommand && document.execCommand('insertText', false, content)) {
+          console.log('[Clippy] Successfully pasted via execCommand');
+          return true;
+        }
+        
+        // Fallback: direct insertion
+        const textNode = document.createTextNode(content);
+        range.insertNode(textNode);
+        range.setStartAfter(textNode);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        
+        console.log('[Clippy] Successfully pasted via direct insertion');
+        return true;
+      }
+    }
+    
+    // For textarea and input elements
+    if (targetElement instanceof HTMLTextAreaElement || targetElement instanceof HTMLInputElement) {
+      console.log('[Clippy] Attempting textarea/input paste...');
+      
+      targetElement.focus();
+      
+      const start = targetElement.selectionStart || 0;
+      const end = targetElement.selectionEnd || 0;
+      const before = targetElement.value.substring(0, start);
+      const after = targetElement.value.substring(end);
+      
+      targetElement.value = before + content + after;
+      targetElement.selectionStart = targetElement.selectionEnd = start + content.length;
+      
+      // Trigger change events
+      targetElement.dispatchEvent(new Event('input', { bubbles: true }));
+      targetElement.dispatchEvent(new Event('change', { bubbles: true }));
+      
+      console.log('[Clippy] Successfully pasted into textarea/input');
+      return true;
+    }
+    
+    console.log('[Clippy] No specific paste method matched, element type:', targetElement.tagName);
+    return false;
+    
+  } catch (error) {
+    console.error('[Clippy] Enhanced paste failed:', error);
+    return false;
+  }
+}
+
 function pasteContentInActiveElementWithDebug(textToPaste: string, _htmlToPaste?: string) {
   console.log('[Clippy] Frame starting paste attempt for text:', textToPaste?.substring(0, 50) + '...');
   
@@ -2151,18 +2455,104 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
 });
 
 async function handlePasteRequest(snippet: Snippet, isHotkey = false) {
-  const version = getCurrentVersion(snippet);
-  let textToUse = version.text;
-  let htmlToUse = version.html ?? '';
+  console.log('[Clippy] Starting paste request for snippet:', snippet.id);
+  console.log('[Clippy] Has ClippyContent:', !!snippet.clippyContent);
   
-  // For hotkey pasting, strip HTML to prevent false success in legacy paste function
-  if (isHotkey) {
-    htmlToUse = '';
-    console.log('[Clippy] Hotkey paste: HTML stripped, using plain text only');
+  let textToUse: string;
+  let htmlToUse: string = '';
+  let useClippyContent = false;
+  
+  // ALWAYS try to migrate snippet to ClippyContent first
+  try {
+    console.log('[Clippy] Attempting to migrate snippet to ClippyContent...');
+    const migratedSnippet = await ClippyProcessor.migrateSnippet(snippet);
+    
+    if (migratedSnippet.clippyContent) {
+      console.log('[Clippy] Successfully migrated snippet to ClippyContent');
+      
+      // Save the migrated snippet back to storage
+      const result = await chrome.storage.local.get('snippets');
+      const snippets: Snippet[] = result.snippets || [];
+      const snippetIndex = snippets.findIndex(s => s.id === snippet.id);
+      if (snippetIndex !== -1) {
+        snippets[snippetIndex] = migratedSnippet;
+        await chrome.storage.local.set({ snippets });
+        console.log('[Clippy] Saved migrated snippet to storage');
+      }
+      
+      // Get platform info from tab URL for better platform detection
+      const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const platformId = detectPlatformFromURL(currentTab?.url || '');
+      console.log('[Clippy] Detected platform from URL:', platformId, 'for URL:', currentTab?.url);
+      
+      // For background script, use simple text rendering since we can't access DOM/window
+      if (migratedSnippet.clippyContent) {
+        console.log('[Clippy] Using simplified ClippyContent rendering for background context');
+        
+        // Simple text rendering without DOM access
+        const blocks = migratedSnippet.clippyContent.blocks;
+        let renderedText = '';
+        
+        for (const block of blocks) {
+          if (block.type === 'paragraph' && 'content' in block) {
+            const text = block.content.map(inline => 
+              inline.type === 'text' ? inline.text : 
+              inline.type === 'link' ? inline.text : ''
+            ).join('');
+            renderedText += text + '\n\n';
+          } else if (block.type === 'heading' && 'content' in block) {
+            const text = block.content.map(inline => 
+              inline.type === 'text' ? inline.text : 
+              inline.type === 'link' ? inline.text : ''
+            ).join('');
+            renderedText += text + '\n\n';
+          } else if (block.type === 'list' && 'items' in block) {
+            for (const item of block.items) {
+              const text = item.content.map(inline => 
+                inline.type === 'text' ? inline.text : 
+                inline.type === 'link' ? inline.text : ''
+              ).join('');
+              renderedText += `• ${text}\n`;
+            }
+            renderedText += '\n';
+          } else if (block.type === 'code' && 'content' in block) {
+            renderedText += block.content + '\n\n';
+          }
+        }
+        
+        textToUse = renderedText.trim();
+        htmlToUse = textToUse; // Keep simple for now
+        useClippyContent = true;
+        
+        console.log('[Clippy] ClippyContent simplified rendering completed');
+        console.log('[Clippy] Text length:', textToUse.length);
+        console.log('[Clippy] Text preview:', textToUse.substring(0, 200) + '...');
+      } else {
+        throw new Error('No ClippyContent after migration');
+      }
+    } else {
+      console.log('[Clippy] Migration failed, no ClippyContent created');
+      throw new Error('Migration failed');
+    }
+  } catch (error) {
+    console.log('[Clippy] ClippyContent migration/processing failed, using legacy system:', error);
+    
+    // Fallback to legacy system
+    const version = getCurrentVersion(snippet);
+    textToUse = version.text;
+    htmlToUse = version.html ?? '';
+    
+    // For hotkey pasting, strip HTML to prevent false success in legacy paste function
+    if (isHotkey) {
+      htmlToUse = '';
+      console.log('[Clippy] Hotkey paste: HTML stripped, using plain text only');
+    }
   }
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return;
 
+  // Handle variable substitution - for ClippyContent we use the original text/html for parsing variables
+  const version = getCurrentVersion(snippet);
   const defs = parseVariables(version.text, version.html);
   if (defs.length > 0) {
     const domain = (() => {
@@ -2192,16 +2582,56 @@ async function handlePasteRequest(snippet: Snippet, isHotkey = false) {
         await chrome.storage.local.set({ variableDefaults: nextStore });
       }
       const resolved = resolveVariables({ text: version.text, html: version.html }, values);
-      textToUse = resolved.text ?? '';
-      htmlToUse = resolved.html ?? '';
+      
+      // Re-process with ClippyContent if we were using it
+      if (useClippyContent) {
+        try {
+          const resolvedContent = resolved.html || resolved.text || '';
+          const processedContent = await ClippyProcessor.processContent(resolvedContent, {
+            format: resolved.html ? 'html' : 'text',
+            sourceUrl: snippet.sourceUrl,
+            sourceDomain: snippet.sourceDomain
+          });
+          const bestContent = await ClippyProcessor.renderForCurrentPlatform(processedContent);
+          textToUse = bestContent;
+          htmlToUse = bestContent;
+        } catch (error) {
+          console.log('[Clippy] ClippyContent re-processing failed after variable substitution:', error);
+          textToUse = resolved.text ?? '';
+          htmlToUse = resolved.html ?? '';
+        }
+      } else {
+        textToUse = resolved.text ?? '';
+        htmlToUse = resolved.html ?? '';
+      }
     } else {
       const resolved = resolveVariables({ text: version.text, html: version.html }, initialValues);
-      textToUse = resolved.text ?? '';
-      htmlToUse = resolved.html ?? '';
+      
+      // Re-process with ClippyContent if we were using it
+      if (useClippyContent) {
+        try {
+          const resolvedContent = resolved.html || resolved.text || '';
+          const processedContent = await ClippyProcessor.processContent(resolvedContent, {
+            format: resolved.html ? 'html' : 'text',
+            sourceUrl: snippet.sourceUrl,
+            sourceDomain: snippet.sourceDomain
+          });
+          const bestContent = await ClippyProcessor.renderForCurrentPlatform(processedContent);
+          textToUse = bestContent;
+          htmlToUse = bestContent;
+        } catch (error) {
+          console.log('[Clippy] ClippyContent re-processing failed after variable substitution:', error);
+          textToUse = resolved.text ?? '';
+          htmlToUse = resolved.html ?? '';
+        }
+      } else {
+        textToUse = resolved.text ?? '';
+        htmlToUse = resolved.html ?? '';
+      }
     }
     
-    // Strip HTML again after variable resolution for hotkey calls
-    if (isHotkey) {
+    // Strip HTML again after variable resolution for hotkey calls (legacy system only)
+    if (isHotkey && !useClippyContent) {
       htmlToUse = '';
       console.log('[Clippy] Hotkey paste: HTML stripped again after variable resolution');
     }
@@ -2209,11 +2639,26 @@ async function handlePasteRequest(snippet: Snippet, isHotkey = false) {
 
   const sanitizedText = textToUse;
   const sanitizedHtml = htmlToUse;
-  const injectionResults = await chrome.scripting.executeScript({
-    target: { tabId: tab.id, allFrames: true },
-    func: pasteContentInActiveElementWithDebug,
-    args: [sanitizedText, sanitizedHtml],
-  });
+  
+  // Use enhanced ClippyContent pasting if available OR for LinkedIn articles
+  let injectionResults;
+  const isLinkedInArticle = tab.url?.includes('linkedin.com') && tab.url?.includes('/article/edit');
+  
+  if (useClippyContent || isLinkedInArticle) {
+    console.log('[Clippy] Using enhanced ClippyContent pasting function - ClippyContent:', useClippyContent, 'LinkedIn Article:', isLinkedInArticle);
+    injectionResults = await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      func: pasteContentWithClippyContent,
+      args: [sanitizedText],
+    });
+  } else {
+    console.log('[Clippy] Using legacy pasting function');
+    injectionResults = await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      func: pasteContentInActiveElementWithDebug,
+      args: [sanitizedText, sanitizedHtml],
+    });
+  }
 
   console.log('[Clippy] Debug paste results per frame:', injectionResults);
   console.log('[Clippy] Detailed paste results:', injectionResults.map(r => ({ frameId: r.frameId, result: r.result })));
@@ -2222,6 +2667,9 @@ async function handlePasteRequest(snippet: Snippet, isHotkey = false) {
   
   if (!success) {
     console.log('[Clippy] Debug paste unsuccessful in all frames. Trying legacy paste method...');
+    
+    // For ClippyContent, we already tried the enhanced method, so use the original legacy method
+    // For legacy content, try the other legacy method
     const legacyResults = await chrome.scripting.executeScript({
       target: { tabId: tab.id, allFrames: true },
       func: pasteContentInActiveElement,

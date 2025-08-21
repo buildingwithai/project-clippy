@@ -25,6 +25,13 @@
     "@radix-ui/react-slot": "^1.2.3",
     "@radix-ui/react-tabs": "^1.1.12",
     "@radix-ui/react-tooltip": "^1.2.7",
+    "@tiptap/extension-character-count": "^3.2.0",
+    "@tiptap/extension-link": "^3.2.0",
+    "@tiptap/extension-placeholder": "^3.2.0",
+    "@tiptap/pm": "^3.2.0",
+    "@tiptap/react": "^3.2.0",
+    "@tiptap/starter-kit": "^3.2.0",
+    "@vercel/node": "^3.0.0",
     "@yoopta/action-menu-list": "^4.9.9",
     "@yoopta/blockquote": "^4.9.9",
     "@yoopta/callout": "^4.9.9",
@@ -55,8 +62,7 @@
     "slate-react": "^0.117.3",
     "sonner": "^2.0.5",
     "tailwind-merge": "^2.6.0",
-    "tailwindcss-animate": "^1.0.7",
-    "@vercel/node": "^3.0.0"
+    "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",
