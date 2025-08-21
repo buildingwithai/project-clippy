@@ -292,6 +292,10 @@ const App: React.FC = () => {
 
   // Refs
   const newFolderInputRef = useRef<HTMLInputElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  
+  // Track scroll position to restore after reloads
+  const [savedScrollPosition, setSavedScrollPosition] = useState<number>(0);
   
   // Configure drag and drop sensors
   const sensors = useSensors(
@@ -316,6 +320,28 @@ const App: React.FC = () => {
     }));
   };
 
+
+  // Save current scroll position
+  const saveScrollPosition = () => {
+    if (scrollAreaRef.current) {
+      const scrollContainer = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
+      if (scrollContainer) {
+        setSavedScrollPosition(scrollContainer.scrollTop);
+      }
+    }
+  };
+
+  // Restore saved scroll position
+  const restoreScrollPosition = useCallback(() => {
+    if (scrollAreaRef.current && savedScrollPosition > 0) {
+      const scrollContainer = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
+      if (scrollContainer) {
+        setTimeout(() => {
+          scrollContainer.scrollTop = savedScrollPosition;
+        }, 0);
+      }
+    }
+  }, [savedScrollPosition]);
 
   // Load snippets and folders from storage
   const loadSnippetsAndFolders = useCallback(async () => {
@@ -371,12 +397,23 @@ const App: React.FC = () => {
       setError('Failed to load data. Please try again.');
     } finally {
       setIsLoading(false);
+      // Restore scroll position after loading completes
+      setTimeout(restoreScrollPosition, 100);
     }
-  }, []);
+  }, [restoreScrollPosition]);
+
+  // Track locally initiated changes to prevent unnecessary reloads
+  const [localUpdateInProgress, setLocalUpdateInProgress] = useState(false);
 
   useEffect(() => {
     loadSnippetsAndFolders();
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
+      // Skip reload if we initiated the change locally (e.g., version selection)
+      if (localUpdateInProgress) {
+        setLocalUpdateInProgress(false);
+        return;
+      }
+      
       if (areaName === 'local' && (changes.snippets || changes.folders)) {
         loadSnippetsAndFolders();
       }
@@ -385,7 +422,14 @@ const App: React.FC = () => {
     return () => {
       chrome.storage.onChanged.removeListener(handleStorageChange);
     };
-  }, [loadSnippetsAndFolders]);
+  }, [loadSnippetsAndFolders, localUpdateInProgress]);
+
+  // Restore scroll position whenever snippets change (due to reloads)
+  useEffect(() => {
+    if (!isLoading && snippets.length > 0) {
+      setTimeout(restoreScrollPosition, 50);
+    }
+  }, [snippets, isLoading, restoreScrollPosition]);
 
   // Handle folder renaming
   const handleFolderRename = async (folderId: string, newName: string) => {
@@ -620,27 +664,32 @@ const App: React.FC = () => {
 
   // Handler for version change in carousel
   const handleVersionChange = async (snippetId: string, versionIndex: number) => {
+    // Save scroll position before any updates
+    saveScrollPosition();
+    
     // Update local state for immediate UI feedback
     setCurrentViewingVersions(prev => ({
       ...prev,
       [snippetId]: versionIndex
     }));
 
-    // Persist the version selection to storage so hotkeys/context menu use this version
-    try {
-      const updatedSnippets = snippets.map(snippet => 
-        snippet.id === snippetId 
-          ? { ...snippet, currentVersionIndex: versionIndex }
-          : snippet
-      );
-      
-      await chrome.storage.local.set({ snippets: updatedSnippets });
-      setSnippets(updatedSnippets);
-      
-      console.log(`[Clippy] Persisted version ${versionIndex} selection for snippet ${snippetId}`);
-    } catch (error) {
-      console.error('[Clippy] Failed to persist version selection:', error);
-    }
+    // Update snippets state locally only for version changes
+    const updatedSnippets = snippets.map(snippet => 
+      snippet.id === snippetId 
+        ? { ...snippet, currentVersionIndex: versionIndex }
+        : snippet
+    );
+    setSnippets(updatedSnippets);
+
+    // Debounced storage update - delay to avoid rapid changes
+    setTimeout(async () => {
+      try {
+        await chrome.storage.local.set({ snippets: updatedSnippets });
+        console.log(`[Clippy] Persisted version ${versionIndex} selection for snippet ${snippetId}`);
+      } catch (error) {
+        console.error('[Clippy] Failed to persist version selection:', error);
+      }
+    }, 300); // 300ms delay to batch rapid changes
   };
 
   // Handler to close the snippet modal
@@ -991,7 +1040,7 @@ const App: React.FC = () => {
             </div>
           )}
 
-                <ScrollArea className="flex-grow">
+                <ScrollArea ref={scrollAreaRef} className="flex-grow">
                   <div className="space-y-4">
                     {/* Pinned Section */}
                     {pinnedSnippets.length > 0 && (

@@ -411,7 +411,7 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
           </div>
         </div>
         
-        <DialogFooter className="mt-6 flex justify-between items-center pt-4 border-t border-slate-700/30">
+        <DialogFooter className="!flex !flex-row !justify-end !space-x-3 !space-y-0 mt-4 pt-3">
           <DialogClose asChild>
             <Button type="button" variant="secondary" className="border-none">
               Cancel
