@@ -95,7 +95,8 @@ export function createNewVersion(
   snippet: Snippet, 
   newText: string, 
   newHtml?: string,
-  newTitle?: string
+  newTitle?: string,
+  newClippyContent?: any
 ): Snippet {
   const currentVersions = getAllVersions(snippet);
   const versionCount = currentVersions.length;
@@ -104,6 +105,7 @@ export function createNewVersion(
     title: newTitle, // Optional version-specific title
     text: newText,
     html: newHtml,
+    clippyContent: newClippyContent,
     createdAt: new Date().toISOString(),
   };
   
@@ -111,6 +113,8 @@ export function createNewVersion(
     ...snippet,
     versions: [...currentVersions, newVersion],
     currentVersionIndex: currentVersions.length, // Point to the new version
+    // Also update root-level clippyContent for new current version
+    clippyContent: newClippyContent,
   };
 }
 
@@ -120,7 +124,8 @@ export function createNewVersion(
 export function updateCurrentVersion(
   snippet: Snippet,
   newText: string,
-  newHtml?: string
+  newHtml?: string,
+  newClippyContent?: any
 ): Snippet {
   const versions = getAllVersions(snippet);
   const currentIndex = snippet.currentVersionIndex ?? 0;
@@ -130,12 +135,15 @@ export function updateCurrentVersion(
     ...updatedVersions[currentIndex],
     text: newText,
     html: newHtml,
+    clippyContent: newClippyContent,
   };
   
   return {
     ...snippet,
     versions: updatedVersions,
     currentVersionIndex: currentIndex,
+    // Also update root-level clippyContent for current version
+    clippyContent: newClippyContent,
   };
 }
 

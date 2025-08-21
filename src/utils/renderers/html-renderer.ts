@@ -51,16 +51,33 @@ export function renderClippyContentToHTML(
 ): string {
   const fullConfig = { ...DEFAULT_HTML_CONFIG, ...config };
   
+  console.log('[HTML Renderer] Input:', {
+    hasContent: !!content,
+    hasBlocks: !!(content?.blocks),
+    blocksLength: content?.blocks?.length || 0,
+    firstBlock: content?.blocks?.[0]
+  });
+  
   if (!content || !content.blocks || content.blocks.length === 0) {
+    console.log('[HTML Renderer] Returning empty - no content/blocks');
     return '';
   }
 
-  const html = content.blocks
-    .map(block => renderContentBlock(block, fullConfig))
-    .filter(html => html.trim()) // Remove empty blocks
-    .join('\n');
+  const renderedBlocks = content.blocks.map((block, index) => {
+    const rendered = renderContentBlock(block, fullConfig);
+    console.log(`[HTML Renderer] Block ${index}:`, {
+      type: block.type,
+      rendered: rendered
+    });
+    return rendered;
+  });
 
-  return fullConfig.cleanOutput ? cleanHTML(html) : html;
+  const html = renderedBlocks.filter(html => html.trim()).join('\n');
+  const finalHtml = fullConfig.cleanOutput ? cleanHTML(html) : html;
+  
+  console.log('[HTML Renderer] Final output:', finalHtml);
+  
+  return finalHtml;
 }
 
 /**

@@ -652,7 +652,7 @@ const App: React.FC = () => {
   };
 
   // Handle saving snippet from modal (create or update)
-  const handleSaveFromModal = async (snippetData: { title: string; text: string; html?: string; folderId: string | null; id?: string; isNewVersion?: boolean; originalSnippetId?: string; versionTitle?: string; sourceUrl?: string; sourceDomain?: string }) => {
+  const handleSaveFromModal = async (snippetData: { title: string; text: string; html?: string; clippyContent?: any; folderId: string | null; id?: string; isNewVersion?: boolean; originalSnippetId?: string; versionTitle?: string; sourceUrl?: string; sourceDomain?: string }) => {
     let updatedSnippets;
     const finalFolderId = (snippetData.folderId === '' || snippetData.folderId === null) ? undefined : snippetData.folderId;
 
@@ -660,7 +660,7 @@ const App: React.FC = () => {
       // Creating new version of existing snippet
       const existingSnippet = snippets.find(s => s.id === snippetData.originalSnippetId);
       if (existingSnippet) {
-        const updatedSnippet = createNewVersion(existingSnippet, snippetData.text.trim(), snippetData.html, snippetData.versionTitle);
+        const updatedSnippet = createNewVersion(existingSnippet, snippetData.text.trim(), snippetData.html, snippetData.versionTitle, snippetData.clippyContent);
         const finalSnippet = { ...updatedSnippet, title: snippetData.title.trim(), folderId: finalFolderId };
         
         updatedSnippets = snippets.map(s => s.id === snippetData.originalSnippetId ? finalSnippet : s);
@@ -684,7 +684,7 @@ const App: React.FC = () => {
         
         if (currentVersionIndex === (existingSnippet.currentVersionIndex ?? 0)) {
           // Editing the current version - use updateCurrentVersion
-          updatedSnippet = updateCurrentVersion(existingSnippet, snippetData.text.trim(), snippetData.html);
+          updatedSnippet = updateCurrentVersion(existingSnippet, snippetData.text.trim(), snippetData.html, snippetData.clippyContent);
         } else {
           // Editing a different version - need to update that specific version
           const allVersions = getAllVersions(existingSnippet);
@@ -694,16 +694,18 @@ const App: React.FC = () => {
               ...updatedVersions[currentVersionIndex],
               text: snippetData.text.trim(),
               html: snippetData.html,
+              clippyContent: snippetData.clippyContent,
             };
             updatedSnippet = {
               ...existingSnippet,
               versions: updatedVersions.slice(1), // Remove the current version since it's stored separately
               text: updatedVersions[0].text,
               html: updatedVersions[0].html,
+              clippyContent: updatedVersions[0].clippyContent,
             };
           } else {
             // Fallback to updating current version
-            updatedSnippet = updateCurrentVersion(existingSnippet, snippetData.text.trim(), snippetData.html);
+            updatedSnippet = updateCurrentVersion(existingSnippet, snippetData.text.trim(), snippetData.html, snippetData.clippyContent);
           }
         }
         
@@ -718,6 +720,7 @@ const App: React.FC = () => {
         title: snippetData.title.trim(),
         text: snippetData.text.trim(), // Will be migrated to versions array
         html: snippetData.html,
+        clippyContent: snippetData.clippyContent, // Include ClippyContent for better copy-paste
         folderId: finalFolderId,
         createdAt: new Date().toISOString(),
         frequency: 0,
@@ -727,6 +730,7 @@ const App: React.FC = () => {
           id: `version-${Date.now()}-0`,
           text: snippetData.text.trim(),
           html: snippetData.html,
+          clippyContent: snippetData.clippyContent, // Include in version as well
           createdAt: new Date().toISOString(),
         }],
         currentVersionIndex: 0,

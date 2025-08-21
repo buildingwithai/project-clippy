@@ -6,8 +6,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { SimpleRichEditor } from '@/components/ui/simple-rich-editor';
 import { TipTapEditor } from '@/components/ui/tiptap-editor';
+import { ClippyProcessor } from '@/utils/clippy-integration';
 import type { ClippyContent } from '../../utils/types';
 
 import type { Snippet, Folder } from '../../utils/types';
@@ -49,14 +49,14 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
   const [clippyContent, setClippyContent] = useState<ClippyContent | undefined>(undefined);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [sourceUrl, setSourceUrl] = useState('');
-  const [useSimpleEditor, setUseSimpleEditor] = useState(false);
-  const [useTipTap, setUseTipTap] = useState(true); // New: prefer TipTap by default
+  // TipTap-only system - no editor switching needed
   const [isCreatingNewVersion, setIsCreatingNewVersion] = useState(false);
   const [versionMode, setVersionMode] = useState<'edit' | 'create'>('edit');
   const [savedContent, setSavedContent] = useState<{ text: string; html?: string; title: string }>({ text: '', html: undefined, title: '' });
   const [createModeContent, setCreateModeContent] = useState<{ text: string; html?: string; versionTitle: string }>({ text: '', html: undefined, versionTitle: '' });
   const [isSwitchingTabs, setIsSwitchingTabs] = useState(false);
   const [versionTitle, setVersionTitle] = useState('');
+  const [isContentReady, setIsContentReady] = useState(false);
   
   // Remove manual slash command state - using YooptaRichEditor for both modes
 
@@ -65,18 +65,88 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
     if (!isOpen || isSwitchingTabs) return;
     
     if (snippetToEdit) {
-      // Editing existing snippet
+      // Editing existing snippet  
+      console.log('[Debug] Editing snippet:', snippetToEdit);
       setTitle(snippetToEdit.title || '');
       const currentVersion = snippetToEdit.versions?.[snippetToEdit.currentVersionIndex ?? 0] || snippetToEdit;
-      const originalText = currentVersion.text || '';
-      const originalHtml = currentVersion.html || undefined;
+      console.log('[Debug] Current version:', currentVersion);
       
+      let originalText = currentVersion.text || '';
+      let originalHtml = currentVersion.html || undefined;
+      
+      // FALLBACK: If no text/html but has ClippyContent, extract text
+      if (!originalText && !originalHtml && currentVersion.clippyContent) {
+        try {
+          // Simple synchronous text extraction from ClippyContent
+          const extractTextFromClippyContent = (content: any): string => {
+            if (!content?.blocks) return '';
+            return content.blocks
+              .map((block: any) => {
+                if (block.type === 'paragraph' || block.type === 'heading') {
+                  return block.content?.map((inline: any) => 
+                    inline.type === 'text' ? inline.text : ''
+                  ).join('') || '';
+                }
+                return '';
+              })
+              .filter((text: string) => text.trim())
+              .join('\n');
+          };
+          
+          originalText = extractTextFromClippyContent(currentVersion.clippyContent);
+        } catch (error) {
+          console.warn('Failed to extract text from ClippyContent:', error);
+        }
+      }
+      
+      console.log('[Debug] Setting text/html:', { originalText, originalHtml });
       setText(originalText);
       setHtml(originalHtml);
       setSelectedFolderId(snippetToEdit.folderId || null);
       setSourceUrl(snippetToEdit.sourceUrl || '');
       setVersionMode('edit'); // Always start in edit mode when editing
       setVersionTitle(''); // Clear version title
+      
+      // Mark content as ready AFTER state is set
+      console.log('[Debug] Setting content ready...');
+      setTimeout(() => {
+        console.log('[Debug] Content is now ready');
+        setIsContentReady(true);
+      }, 0);
+      
+      // Auto-migrate existing content to ClippyContent for TipTap
+      const migrateToClippyContent = async () => {
+        try {
+          if (currentVersion.clippyContent) {
+            // Already has ClippyContent
+            setClippyContent(currentVersion.clippyContent);
+          } else if (originalHtml || originalText) {
+            // Convert existing content to ClippyContent
+            const content = originalHtml || originalText;
+            const clippyContent = await ClippyProcessor.processContent(content, {
+              format: originalHtml ? 'html' : 'text',
+              sourceUrl: snippetToEdit.sourceUrl,
+              sourceDomain: snippetToEdit.sourceDomain
+            });
+            setClippyContent(clippyContent);
+          }
+        } catch (error) {
+          console.warn('Auto-migration failed, using fallback:', error);
+          // Fallback: create basic ClippyContent from text
+          if (originalText) {
+            setClippyContent({
+              version: "1.0",
+              blocks: [{
+                id: `block-${Date.now()}`,
+                type: 'paragraph',
+                content: [{ type: 'text', text: originalText }]
+              }]
+            });
+          }
+        }
+      };
+      
+      migrateToClippyContent();
       
       // Store the original content for restoration
       setSavedContent({ text: originalText, html: originalHtml, title: snippetToEdit.title || '' });
@@ -89,6 +159,9 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
       setVersionMode('edit'); // Reset to edit mode for new snippets
       setVersionTitle(''); // Clear version title
       setSavedContent({ text: '', html: undefined, title: '' }); // Clear saved content
+      
+      // Content is immediately ready for new snippets
+      setIsContentReady(true);
       
       // Auto-populate URL from storage or current tab
       const loadInitialUrl = async () => {
@@ -108,19 +181,12 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
     return () => {
       if (!isOpen) {
         setIsSwitchingTabs(false);
+        setIsContentReady(false);
       }
     };
   }, [isOpen, snippetToEdit, initialText, initialHtml]);
 
-  // Remove manual slash command menu effect - using YooptaRichEditor for both modes
-
-  // Handle rich text editor content change
-  const handleEditorChange = (content: { html: string; text: string }) => {
-    setText(content.text);
-    setHtml(content.html);
-  };
-
-  // Handle TipTap editor content change
+  // TipTap-only content change handler
   const handleTipTapChange = (content: { clippyContent: ClippyContent; html: string; text: string }) => {
     setText(content.text);
     setHtml(content.html);
@@ -176,6 +242,7 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
       title: title.trim(),
       text: text.trim(),
       html: html || undefined,
+      clippyContent: clippyContent || undefined, // Include ClippyContent for better copy-paste
       folderId: selectedFolderId,
       isNewVersion: isCreatingNewVersion || undefined,
       originalSnippetId: isCreatingNewVersion ? snippetToEdit?.id : undefined,
@@ -183,6 +250,8 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
       sourceUrl: sourceUrl.trim() || undefined,
       sourceDomain: sourceUrl.trim() ? (extractDomain(sourceUrl.trim()) || undefined) : undefined,
     };
+    
+    
     onSave(snippetData);
     onClose();
   };
@@ -310,60 +379,35 @@ export const SnippetFormModal: React.FC<SnippetFormModalProps> = ({
             </div>
           </div>
           
-          {/* Content editor - clean and focused */}
+          {/* TipTap Editor - clean and focused */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <div className="text-xs text-slate-400">💡 Use '/' for formatting</div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (useTipTap) {
-                      setUseTipTap(false);
-                      setUseSimpleEditor(false);
-                    } else if (!useSimpleEditor) {
-                      setUseSimpleEditor(true);
-                    } else {
-                      setUseTipTap(true);
-                      setUseSimpleEditor(false);
-                    }
-                  }}
-                  className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
-                >
-                  {useTipTap ? 'TipTap' : useSimpleEditor ? 'Plain' : 'Rich'}
-                </button>
-              </div>
+              <div className="text-xs text-slate-400">💡 Use toolbar for formatting</div>
+              <div className="text-xs text-slate-400">TipTap Editor</div>
             </div>
 
-            {useSimpleEditor ? (
-              <textarea
-                key={`textarea-${versionMode}`}
-                value={text}
-                onChange={(e) => {
-                  setText(e.target.value);
-                  setHtml(undefined);
-                  setClippyContent(undefined);
-                }}
-                placeholder="Enter your snippet content..."
-                className="w-full h-32 p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg text-slate-100 placeholder-slate-500 text-sm focus:ring-1 focus:ring-sky-500 focus:border-sky-500/50 resize-none"
-              />
-            ) : useTipTap ? (
+            {isContentReady ? (
               <TipTapEditor
-                key={`tiptap-${versionMode}`}
-                value={clippyContent || html || (text ? `<p>${text.replace(/\n/g, '</p><p>')}</p>` : '')}
+                key={`tiptap-${versionMode}-${snippetToEdit?.id || 'new'}`}
+                value={
+                  // CRITICAL FIX: Use HTML fallback if ClippyContent has empty blocks
+                  clippyContent && clippyContent.blocks && clippyContent.blocks.length > 0 
+                    ? clippyContent 
+                    : (html || text || '')
+                }
                 onChange={handleTipTapChange}
-                placeholder="Enter your snippet content... Use toolbar for formatting."
-                className="h-32"
+                placeholder="Enter your snippet content... Use toolbar for rich formatting."
+                className="h-40"
               />
             ) : (
-              <SimpleRichEditor
-                key={`richeditor-${versionMode}`}
-                value={html || (text ? `<p>${text.replace(/\n/g, '</p><p>')}</p>` : '')}
-                onChange={handleEditorChange}
-                placeholder="Enter your snippet content... Use toolbar for formatting."
-                className="h-32"
-              />
+              <div className="border border-slate-700 rounded-lg bg-slate-800/50 p-4 h-40 flex items-center justify-center">
+                <div className="text-slate-400">Loading content...</div>
+              </div>
             )}
+            {/* Debug info */}
+            <div className="text-xs text-slate-500 mt-1">
+              Debug: clippyContent={!!clippyContent ? 'yes' : 'no'}, html={!!html ? 'yes' : 'no'}, text={!!text ? 'yes' : 'no'}, ready={isContentReady ? 'yes' : 'no'}
+            </div>
           </div>
         </div>
         

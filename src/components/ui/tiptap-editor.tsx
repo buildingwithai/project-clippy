@@ -125,23 +125,43 @@ export const TipTapEditor: React.FC<TipTapEditorProps> = ({
   // Handle value changes from parent
   useEffect(() => {
     if (!editor || isUpdatingRef.current) return;
+    
+    // CRITICAL: Don't update content if editor is focused (user is typing)
+    if (editor.isFocused) {
+      console.log('[TipTap Debug] Skipping - editor focused');
+      return;
+    }
+
+    console.log('[TipTap Debug] useEffect triggered:', {
+      valueType: typeof value,
+      hasValue: !!value,
+      valuePreview: typeof value === 'string' ? value.substring(0, 50) : 'ClippyContent'
+    });
 
     isUpdatingRef.current = true;
 
     try {
       if (!value) {
+        console.log('[TipTap Debug] Setting empty content');
         editor.commands.setContent('');
       } else if (typeof value === 'string') {
         // Handle string input (HTML or plain text)
         if (value.includes('<') && value.includes('>')) {
-          editor.commands.setContent(value);
+          console.log('[TipTap Debug] Setting HTML content:', value.substring(0, 100));
+          const success = editor.commands.setContent(value);
+          console.log('[TipTap Debug] HTML content set success:', success);
         } else {
-          editor.commands.setContent(`<p>${value}</p>`);
+          console.log('[TipTap Debug] Setting text content:', value.substring(0, 100));
+          const success = editor.commands.setContent(`<p>${value}</p>`);
+          console.log('[TipTap Debug] Text content set success:', success);
         }
       } else {
         // Handle ClippyContent input
+        console.log('[TipTap Debug] Setting ClippyContent');
         const html = renderClippyContentToHTML(value);
-        editor.commands.setContent(html);
+        console.log('[TipTap Debug] Rendered HTML:', html.substring(0, 100));
+        const success = editor.commands.setContent(html);
+        console.log('[TipTap Debug] ClippyContent set success:', success);
       }
     } catch (error) {
       console.error('[TipTap Editor] Error setting content:', error);
@@ -219,8 +239,8 @@ export const TipTapEditor: React.FC<TipTapEditorProps> = ({
 
   return (
     <div className={`border border-slate-700 rounded-lg overflow-hidden bg-slate-800/50 ${className}`}>
-      {/* Toolbar */}
-      <div className="flex items-center gap-1 p-2 border-b border-slate-700/50 bg-slate-900/50">
+      {/* Toolbar - sticky at top */}
+      <div className="sticky top-0 z-10 flex items-center gap-1 p-2 border-b border-slate-700/50 bg-slate-900">
         <Button
           type="button"
           variant="ghost"
@@ -337,8 +357,8 @@ export const TipTapEditor: React.FC<TipTapEditorProps> = ({
         )}
       </div>
 
-      {/* Editor content */}
-      <div className="min-h-[120px] max-h-[300px] overflow-y-auto">
+      {/* Editor content - scrollable area */}
+      <div className="min-h-[120px] max-h-[240px] overflow-y-auto">
         <EditorContent 
           editor={editor}
           className="tiptap-content"
