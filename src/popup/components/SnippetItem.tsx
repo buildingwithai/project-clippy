@@ -124,7 +124,7 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
         {snippet.lastUsed && (
           <Badge size="small" variant="outline" aria-label="Last used date" className="flex items-center gap-1">
             <Clock size={10} />
-            <span className="text-foreground font-medium">Last\u00A0Used</span>
+            <span className="text-foreground font-medium whitespace-nowrap">Last Used</span>
             <span className="w-px h-2 bg-slate-500/60 self-center mx-1" />
             <span className="text-slate-400">{formatDateToMD(snippet.lastUsed)}</span>
           </Badge>
