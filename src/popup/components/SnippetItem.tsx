@@ -95,6 +95,8 @@ export const SnippetItem: React.FC<SnippetItemProps> = ({
             onDelete={() => onDeleteSnippet(snippet.id)}
             onViewSource={snippet.sourceUrl ? () => window.open(snippet.sourceUrl, '_blank') : undefined}
             hasSourceUrl={!!snippet.sourceUrl}
+            onTogglePin={() => onPinSnippet(snippet.id)}
+            isPinned={!!snippet.isPinned}
           />
         </div>
       </div>
