@@ -5,7 +5,7 @@
  */
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { MoreHorizontal, Edit, Trash2, FolderOpen, ExternalLink } from 'lucide-react';
+import { MoreHorizontal, Edit, Trash2, FolderOpen, ExternalLink, Star } from 'lucide-react';
 
 interface HamburgerMenuProps {
   onEdit?: () => void;
@@ -13,6 +13,8 @@ interface HamburgerMenuProps {
   onMoveToFolder?: () => void;
   onViewSource?: () => void;
   hasSourceUrl?: boolean;
+  onTogglePin?: () => void;
+  isPinned?: boolean;
   className?: string;
 }
 
@@ -22,6 +24,8 @@ export const HamburgerMenu: React.FC<HamburgerMenuProps> = ({
   onMoveToFolder,
   onViewSource,
   hasSourceUrl = false,
+  onTogglePin,
+  isPinned = false,
   className = '',
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -33,6 +37,7 @@ export const HamburgerMenu: React.FC<HamburgerMenuProps> = ({
   // Build available menu items dynamically
   const menuItems = [
     ...(onEdit ? [{ action: onEdit, label: 'Edit', icon: Edit, className: 'text-slate-200 hover:bg-slate-700 hover:text-white' }] : []),
+    ...(onTogglePin ? [{ action: onTogglePin, label: isPinned ? 'Unpin' : 'Pin', icon: Star, className: 'text-slate-200 hover:bg-slate-700 hover:text-white' }] : []),
     ...(onMoveToFolder ? [{ action: onMoveToFolder, label: 'Move to Folder', icon: FolderOpen, className: 'text-slate-200 hover:bg-slate-700 hover:text-white' }] : []),
     ...(hasSourceUrl && onViewSource ? [{ action: onViewSource, label: 'View Source', icon: ExternalLink, className: 'text-slate-200 hover:bg-slate-700 hover:text-white', separator: true }] : []),
     ...(onDelete ? [{ action: onDelete, label: 'Delete', icon: Trash2, className: 'text-red-400 hover:bg-red-900/20 hover:text-red-300', separator: true }] : []),
